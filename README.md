@@ -31,7 +31,8 @@ binsim/             library (simulator-independent except binsim/sim/)
   sim/              Isaac Lab: scene.py, runner.py, randomize.py, compat.py (version shims)
 scripts/            generate.py, launch_multi_gpu.py, prepare_assets.py, visualize.py, verify_poses.py
 tests/              pytest (no Isaac needed; uses a CPU z-buffer renderer)
-legacy/             the original single-camera capture script
+legacy/             the original single-camera capture script (+ its README / output format;
+                    it loads assets/f2x_lab_get_data.usd)
 ```
 
 ## Install
