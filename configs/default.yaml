@@ -1,0 +1,102 @@
+# Bin-picking dataset experiment. Override any leaf on the CLI:
+#   python scripts/generate.py --config configs/default.yaml run.num_envs=32 loading.mode=layers
+# Presets (camera / robot+gripper) are merged first; keys below override them.
+defaults: [cameras/phoxi_m, robots/ur10_suction]
+
+sim:
+  experience: null          # e.g. ~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.full.kit (null = Isaac Lab default)
+  headless: true
+  device: cuda:0
+  physics_dt: 0.005         # s; 200 Hz is plenty for resting piles
+  seed: 0
+  quat_order: auto          # auto | wxyz | xyzw — Isaac Lab <3 uses wxyz; set explicitly if poses look rotated
+  render_during_settle: null  # null = only when running with a GUI (watching the pile fall); false is much faster
+
+run:
+  output_dir: ~/IsaacSim/captures/bin_ds
+  num_envs: 8               # bins simulated + rendered in parallel on one GPU
+  env_spacing_m: 4.0
+  num_scenes: 200           # settled piles per shard (rounded up to a multiple of num_envs)
+  views_per_scene: 4        # camera viewpoints rendered per settled pile (physics paid once)
+  shard_id: 0               # set by scripts/launch_multi_gpu.py
+  save_overview_every: 25   # whole-scene overview image every N batches (0 = only the first)
+  save_viz_every: 1         # annotated bin image every N scenes (0 = off)
+  writer_threads: 8
+  log_every_s: 5.0
+
+assets:
+  cache_dir: ../assets_cache  # converted STL/USD/PLY (keyed by source hash + settings)
+
+bin:
+  mesh: null                # STEP/STL/OBJ of your real bin; null = procedural box from size_m
+  size_m: [0.60, 0.40, 0.25]  # outer size (procedural bin)
+  wall_thickness_m: 0.01
+  inner_size_m: null        # required with `mesh`: usable inner volume [x, y, z]
+  floor_z_m: null           # with `mesh`: inner floor height in the bin frame (default: wall_thickness_m)
+  units: m                  # units of `mesh` (mm | m)
+  pos_m: [0.0, 0.0, 0.0]    # bin frame origin (bottom center) in the env frame
+  rpy_deg: [0, 0, 0]
+  friction: 0.5
+  collision: convexHull     # procedural: per-wall boxes; mesh bins: none (triangle mesh, kinematic OK) | convexDecomposition | sdf
+  color: [0.12, 0.25, 0.55]
+
+parts:                      # one or more part types; each scene samples a count per type
+  - config: parts/gear_example.yaml
+    count: [8, 25]
+
+loading:
+  mode: mixed               # random (drop into a cluster) | layers (ordered stacks) | mixed (per scene)
+  mixed_layers_prob: 0.3
+  wall_margin_m: 0.01
+  random:
+    drop_height_m: [0.02, 0.15]   # extra clearance above the pile/floor when spawning
+    orientation: uniform          # uniform | layer (layer orientation + yaw) | flat (layer orientation + random flip + yaw)
+  layers:
+    num_layers: [1, 3]
+    spacing_m: 0.004
+    pos_jitter_m: 0.004
+    yaw_jitter_deg: 15
+    flip_prob: 0.0
+    fill_ratio: [0.7, 1.0]        # fraction of grid cells used per layer (top layer is often partial)
+    overflow: drop                # parts that don't fit the layers: drop (random on top) | discard
+  shake:                          # "random shakes" while the pile settles
+    impulses: 2                   # number of random velocity kicks to all parts
+    lin_vel_mps: 0.15
+    ang_vel_rps: 2.0
+    bin_oscillation:              # kinematic bin wiggle (experimental: large amp can tunnel parts)
+      amp_m: 0.0
+      freq_hz: 3.0
+      duration_s: 0.6
+  settle:
+    min_steps: 60
+    max_steps: 1200
+    lin_vel_thresh: 0.005   # m/s — every part in every env below this ...
+    ang_vel_thresh: 0.05    # rad/s
+    hold_steps: 10          # ... for this many consecutive steps
+    escape_margin_m: 0.02   # parts outside the bin by more than this are removed before capture
+
+randomization:
+  lights:
+    dome_intensity: [300, 1500]
+    key_intensity: [2000, 12000]   # sphere light placed randomly above the bin
+    key_height_m: [1.2, 2.0]
+    key_offset_m: 0.8
+  part_materials: true             # per-instance color/roughness/metallic jitter around part `color`
+  color_jitter: 0.08
+  bin_materials: true
+
+grasps:
+  enabled: true
+  min_visib: 0.6            # a part must be at least this visible to be "pickable"
+  max_approach_angle_deg: 45  # from straight down (world -Z)
+  approach_clearance_m: 0.05  # swept length checked above the grasp along the approach axis
+  point_samples: 1500       # surface points per part for collision checks
+  max_grasps_per_part: 64
+
+outputs:
+  bop: true
+  coco: true
+  pointcloud_ply: false     # per-view colored point cloud from (noisy) depth
+  viz: true
+  depth_scale: 0.1          # BOP depth_scale: depth_png * depth_scale = mm  (0.1 -> 0.1 mm steps, max 6.5 m)
+  verify_first_scene: true  # reprojection IoU check on the first scene (catches pose-convention bugs early)

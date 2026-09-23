@@ -1,0 +1,25 @@
+# Generic RGB-D camera (RealSense-class). Uses a horizontal FOV instead of fx/fy.
+camera:
+  model: generic RGB-D
+  resolution: [1280, 720]
+  render_scale: 1.0
+  intrinsics: {hfov_deg: 69.0}
+  depth_range_m: [0.2, 3.0]
+  image_mode: rgb
+  mount:
+    height_above_rim_m: 0.5
+    offset_m: [0.0, 0.0, 0.0]
+    look_at_m: [0.0, 0.0, 0.0]
+    image_up_world: [0, 1, 0]
+  pose_jitter: {pos_m: 0.05, look_at_m: 0.03, roll_deg: 8.0}
+  render_subframes: 2
+  noise:
+    enabled: true
+    sigma_mm_at_1m: 2.0
+    quantize_mm: 1.0
+    edge_grad_mm: 10.0
+    edge_dropout_prob: 0.5
+    edge_dilate_px: 1
+    max_incidence_deg: 80
+    random_dropout: 0.005
+    projector: {enabled: true, baseline_m: [0.05, 0.0, 0.0], tolerance_mm: 3.0, downsample: 2}

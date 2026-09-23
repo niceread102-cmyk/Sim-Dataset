@@ -1,0 +1,10 @@
+# Isaac Lab provides torch / pxr / isaaclab. Outside Isaac add `usd-core` for asset prep & tests.
+numpy
+pyyaml
+pillow
+trimesh
+opencv-python-headless   # optional: much faster silhouette masks
+pytest
+# STEP support (one of):
+#   cadquery
+#   gmsh

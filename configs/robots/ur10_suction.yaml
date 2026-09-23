@@ -1,0 +1,32 @@
+# Robot + gripper preset. The robot is scene context (occlusion/realism) held in a parked pose;
+# the gripper collision model below is what grasps are checked against (see binsim/grasps.py).
+robot:
+  enabled: true
+  usd: "{ISAACLAB_NUCLEUS_DIR}/Robots/UniversalRobots/UR10/ur10_instanceable.usd"
+  pos_m: [-0.75, 0.0, 0.0]     # base in the env frame (bin bottom-center is the env origin)
+  rpy_deg: [0, 0, 0]
+  joint_pos:                   # parked out of the camera frustum (regex -> rad)
+    shoulder_pan_joint: 3.1416
+    shoulder_lift_joint: -1.2
+    elbow_joint: 1.4
+    wrist_1_joint: -1.7
+    wrist_2_joint: -1.57
+    wrist_3_joint: 0.0
+  stiffness: 10000.0
+  damping: 1000.0
+
+gripper:
+  type: suction                # suction | parallel_jaw
+  usd: null                    # optional visual gripper USD referenced under attach_link (no rigid bodies)
+  attach_link: ee_link
+  attach_pos_m: [0.0, 0.0, 0.0]
+  attach_rpy_deg: [0, 0, 0]
+  # Gripper frame: origin = TCP (suction contact point / jaw center), +Z = approach direction
+  # (pointing INTO the part), primitives extend toward -Z (back toward the robot).
+  suction:
+    cup_radius_m: 0.006   # must fit on the part's flat patches
+    max_planarity_err_m: 0.0012  # surface under the cup must be this flat for a seal
+    max_normal_dev_deg: 12
+  primitives:
+    - {type: cylinder, radius_m: 0.008, z_m: [-0.030, -0.002]}   # bellows cup
+    - {type: cylinder, radius_m: 0.016, z_m: [-0.180, -0.030]}   # tool body / extension
