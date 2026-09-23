@@ -13,7 +13,7 @@ For each settled bin it writes:
 - visual reports: a whole-scene overview, and an annotated bin image with 6DOF axes and the
   top-most part's grasp arrow, depth, masks and a per-part pose table
 
-![panel](docs/example_panel.jpg)
+![panel](bin_ds/shard_00/viz/000000_00_bin.jpg)
 
 ## Layout
 
