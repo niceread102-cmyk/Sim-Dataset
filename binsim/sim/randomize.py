@@ -3,8 +3,9 @@ Materials are created once per (env, slot) and only their inputs change per batc
 from __future__ import annotations
 
 import numpy as np
-from pxr import Gf, Sdf, UsdGeom, UsdShade
+from pxr import Gf, UsdGeom, UsdShade
 
+from ..assets import define_omnipbr, set_omnipbr
 from ..config import as_range
 
 
@@ -28,14 +29,7 @@ class Randomizer:
             self._make_bin_materials()
 
     def _material(self, path: str):
-        mat = UsdShade.Material.Define(self.stage, path)
-        sh = UsdShade.Shader.Define(self.stage, f"{path}/Shader")
-        sh.CreateIdAttr("UsdPreviewSurface")
-        for name, typ in (("diffuseColor", Sdf.ValueTypeNames.Color3f), ("roughness", Sdf.ValueTypeNames.Float),
-                          ("metallic", Sdf.ValueTypeNames.Float)):
-            sh.CreateInput(name, typ)
-        mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
-        return mat, sh
+        return define_omnipbr(self.stage, path)
 
     def _bind(self, prim_path: str, mat):
         prim = self.stage.GetPrimAtPath(prim_path)
@@ -77,11 +71,8 @@ class Randomizer:
             p = self.cfg.parts[self.slot_type[s]]
             base = np.asarray(p.get("color", [0.7, 0.7, 0.7]), float)
             col = np.clip(base * rng.uniform(1 - jit * 2, 1 + jit * 2) + rng.normal(0, jit / 2, 3), 0, 1)
-            sh.GetInput("diffuseColor").Set(Gf.Vec3f(*col))
-            sh.GetInput("roughness").Set(float(rng.uniform(*as_range(p.get("roughness", 0.5)))))
-            sh.GetInput("metallic").Set(float(rng.uniform(*as_range(p.get("metallic", 0.0)))))
+            set_omnipbr(sh, col, p.get("color_tint", [1.0, 1.0, 1.0]),
+                        rng.uniform(*as_range(p.get("roughness", 0.5))), rng.uniform(*as_range(p.get("metallic", 0.0))))
         for sh in self.bin_shaders:
             base = np.asarray(self.cfg.bin.get("color", [0.2, 0.3, 0.6]), float)
-            sh.GetInput("diffuseColor").Set(Gf.Vec3f(*np.clip(base + rng.normal(0, jit, 3), 0, 1)))
-            sh.GetInput("roughness").Set(float(rng.uniform(0.4, 0.9)))
-            sh.GetInput("metallic").Set(0.0)
+            set_omnipbr(sh, np.clip(base + rng.normal(0, jit, 3), 0, 1), [1.0, 1.0, 1.0], rng.uniform(0.4, 0.9), 0.0)

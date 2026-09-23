@@ -1,0 +1,28 @@
+# Side plate (cast, before machining). Reference: /home/v/IsaacSim/assets/myeonghwa/SIDE_PLATE.usd
+# (same mm->m scale, mass, convex decomposition with 32 hulls).
+name: side_plate
+mesh: /home/v/stl/SIDE-PLATE.stl   # 54 x 54 x 9.6 mm, watertight
+units: mm
+recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
+mass_kg: 0.1              # SIDE_PLATE.usd physics:mass; 13.3 cm^3 x steel 7.85 g/cm^3 = 0.104 kg
+friction: 0.5             # SIDE_PLATE.usd has no physics material -> PhysX defaults (friction 0.5, restitution 0)
+restitution: 0.0
+collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
+max_convex_hulls: 32      # same as SIDE_PLATE.usd
+# OmniPBR values copied from SIDE_PLATE.usd (Base Color, Color Tint, Roughness Amount, Metallic Amount)
+color: [0.28571427, 0.2857114, 0.2857114]
+color_tint: [0.66023165, 0.66022503, 0.66022503]
+roughness: 0.5
+metallic: 1.0
+
+# Measured from the mesh: 180 deg about Z maps the part onto itself (0.17 mm, = sampling noise);
+# 90/120/60 deg do not (~0.7 mm), and top/bottom differ (flip 1.3 mm).
+symmetry: {axis: [0, 0, 1], order: 2, flip: false}
+
+# Rests flat (thin axis = Z) when stacked in layers.
+layer_rpy_deg: [0, 0, 0]
+
+grasps:
+  suction_auto: {num: 48, seed: 0}
+  suction: []
+  parallel_jaw: []

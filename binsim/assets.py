@@ -10,6 +10,7 @@ convex-decomposition (or convex-hull / SDF) colliders; the bin is a kinematic ri
 """
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
@@ -23,8 +24,35 @@ import trimesh
 
 from .config import to_plain
 
-ASSET_VERSION = 3  # bump to invalidate caches when authoring changes
+ASSET_VERSION = 5  # bump to invalidate caches when authoring changes
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "cm": 1e-2, "in": 0.0254}
+
+_simulation_app = None  # set if we had to boot Isaac Sim just to get `pxr` (see _ensure_pxr)
+
+
+def _ensure_pxr():
+    """`pip install usd-core` has no aarch64 wheel, and on some Isaac Sim/Kit builds `pxr` is
+    only put on sys.path once a Kit app has started (it's not importable from a bare
+    `isaaclab.sh -p` / `python.sh -c "import pxr"`). If a plain `import pxr` fails, boot a
+    headless Isaac Sim app once per process so the rest of this module can use it normally."""
+    try:
+        import pxr  # noqa: F401
+        return
+    except ImportError:
+        pass
+    global _simulation_app
+    if _simulation_app is not None:
+        return
+    try:
+        from isaacsim import SimulationApp
+    except ImportError:
+        raise ImportError(
+            "`pxr` is not importable and `isaacsim` isn't on this Python either. Install "
+            "`usd-core` (has no aarch64 wheel — use an Isaac Sim/Isaac Lab python there instead), "
+            "or run this via `<isaac-sim-root>/python.sh` / `isaaclab.sh -p`."
+        ) from None
+    _simulation_app = SimulationApp({"headless": True})
+    atexit.register(_simulation_app.close)
 
 
 @dataclass
@@ -118,6 +146,9 @@ def _add_mesh(stage, prim_path: str, mesh: trimesh.Trimesh, approximation: str, 
     geom.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*map(float, v)) for v in mesh.vertices]))
     geom.CreateFaceVertexCountsAttr(Vt.IntArray([3] * len(mesh.faces)))
     geom.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.faces.flatten().tolist()))
+    # per-triangle normals, like Isaac Sim's STL import (otherwise the renderer smooths across hard edges)
+    geom.CreateNormalsAttr(Vt.Vec3fArray([Gf.Vec3f(*map(float, n)) for n in np.repeat(mesh.face_normals, 3, axis=0)]))
+    geom.SetNormalsInterpolation(UsdGeom.Tokens.faceVarying)
     geom.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
     lo, hi = mesh.bounds
     geom.CreateExtentAttr([Gf.Vec3f(*map(float, lo)), Gf.Vec3f(*map(float, hi))])
@@ -142,15 +173,38 @@ def _sdf_type(name):
             "float": Sdf.ValueTypeNames.Float}[name]
 
 
-def _add_materials(stage, root: str, color, friction: float, restitution: float, roughness=0.5, metallic=0.0):
-    from pxr import Gf, Sdf, UsdPhysics, UsdShade
-    vis = UsdShade.Material.Define(stage, f"{root}/Looks/Visual")
-    sh = UsdShade.Shader.Define(stage, f"{root}/Looks/Visual/Shader")
-    sh.CreateIdAttr("UsdPreviewSurface")
-    sh.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*map(float, color)))
-    sh.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
-    sh.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(metallic))
-    vis.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
+def define_omnipbr(stage, path: str):
+    """OmniPBR (MDL) material — the shader Isaac Sim's GUI creates, so parts look the same as GUI-made USDs."""
+    from pxr import Sdf, UsdShade
+    mat = UsdShade.Material.Define(stage, path)
+    sh = UsdShade.Shader.Define(stage, f"{path}/Shader")
+    sh.SetSourceAsset(Sdf.AssetPath("OmniPBR.mdl"), "mdl")
+    sh.SetSourceAssetSubIdentifier("OmniPBR", "mdl")
+    for name, typ in (("diffuse_color_constant", Sdf.ValueTypeNames.Color3f),
+                      ("diffuse_tint", Sdf.ValueTypeNames.Color3f),
+                      ("reflection_roughness_constant", Sdf.ValueTypeNames.Float),
+                      ("metallic_constant", Sdf.ValueTypeNames.Float)):
+        sh.CreateInput(name, typ)
+    out = sh.CreateOutput("out", Sdf.ValueTypeNames.Token)
+    mat.CreateSurfaceOutput("mdl").ConnectToSource(out)
+    mat.CreateDisplacementOutput("mdl").ConnectToSource(out)
+    mat.CreateVolumeOutput("mdl").ConnectToSource(out)
+    return mat, sh
+
+
+def set_omnipbr(sh, color, tint, roughness: float, metallic: float):
+    from pxr import Gf
+    sh.GetInput("diffuse_color_constant").Set(Gf.Vec3f(*map(float, color)))
+    sh.GetInput("diffuse_tint").Set(Gf.Vec3f(*map(float, tint)))
+    sh.GetInput("reflection_roughness_constant").Set(float(roughness))
+    sh.GetInput("metallic_constant").Set(float(metallic))
+
+
+def _add_materials(stage, root: str, color, friction: float, restitution: float, roughness=0.5, metallic=0.0,
+                   tint=(1.0, 1.0, 1.0)):
+    from pxr import UsdPhysics, UsdShade
+    vis, sh = define_omnipbr(stage, f"{root}/Looks/Visual")
+    set_omnipbr(sh, color, tint, roughness, metallic)
     phys = UsdShade.Material.Define(stage, f"{root}/Looks/Physics")
     pm = UsdPhysics.MaterialAPI.Apply(phys.GetPrim())
     pm.CreateStaticFrictionAttr(float(friction))
@@ -179,7 +233,8 @@ def write_part_usd(path: str, mesh: trimesh.Trimesh, part_cfg):
     rough = float(np.mean(rough)) if isinstance(rough, (list, tuple)) else float(rough)
     metal = float(np.mean(metal)) if isinstance(metal, (list, tuple)) else float(metal)
     vis, phys = _add_materials(stage, "/Part", part_cfg.get("color", [0.7, 0.7, 0.7]),
-                               part_cfg.get("friction", 0.5), part_cfg.get("restitution", 0.0), rough, metal)
+                               part_cfg.get("friction", 0.5), part_cfg.get("restitution", 0.0), rough, metal,
+                               part_cfg.get("color_tint", [1.0, 1.0, 1.0]))
     _bind(geom, vis, phys)
     stage.GetRootLayer().Save()
 
@@ -219,8 +274,8 @@ def write_bin_usd(path: str, meshes: list[trimesh.Trimesh], bin_cfg, approximati
 
 def prepare_part(part_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
     settings = {k: part_cfg.get(k) for k in ("units", "recenter", "mass_kg", "friction", "restitution",
-                                             "collision", "max_convex_hulls", "color", "roughness", "metallic",
-                                             "step_tolerance_mm")}
+                                             "collision", "max_convex_hulls", "color", "color_tint", "roughness",
+                                             "metallic", "step_tolerance_mm")}
     key = _hash(part_cfg["mesh"], settings)
     d = os.path.join(cache_dir, f"{part_cfg['name']}_{key}")
     usd, stl, ply = (os.path.join(d, f) for f in ("part.usd", "model.stl", "model_mm.ply"))
@@ -263,7 +318,9 @@ def prepare_bin(bin_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
                 approx = "none"  # a hull would fill the bin; use the triangle mesh (fine for kinematic)
         else:
             meshes = procedural_bin_meshes(bin_cfg["size_m"], float(bin_cfg.get("wall_thickness_m", 0.01)))
-            approx = "convexHull"
+            # triangle mesh (fine for a kinematic bin): convexHull / convexDecomposition colliders of these thin
+            # boxes let parts sink through the floor on the GB10 / Isaac Sim 6.0 build
+            approx = "none"
         trimesh.util.concatenate(meshes).export(stl)
         write_bin_usd(usd, meshes, bin_cfg, approx)
     mesh = trimesh.load(stl, force="mesh")
@@ -271,6 +328,7 @@ def prepare_bin(bin_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
 
 
 def prepare_all(cfg, force: bool = False):
+    _ensure_pxr()
     cache = cfg.assets.cache_dir
     os.makedirs(cache, exist_ok=True)
     parts = [prepare_part(p, cache, force) for p in cfg.parts]

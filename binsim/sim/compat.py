@@ -37,6 +37,18 @@ def detect_quat_order(setting: str = "auto") -> str:
     return _QUAT_ORDER
 
 
+def disable_isaacsim_physics_warm_start():
+    """Isaac Lab 3.x loads physics and creates its tensor views itself in SimulationContext.reset(); Isaac Sim's
+    SimulationManager reloading physics on timeline PLAY deletes those views (invalid views / GPU hang).
+    isaaclab_physx rebinds `isaacsim.core.simulation_manager.SimulationManager` to its PhysxManager, but the
+    original class has already subscribed to PLAY, so import it from its impl module."""
+    try:
+        from isaacsim.core.simulation_manager.impl.simulation_manager import SimulationManager
+    except ImportError:
+        return
+    SimulationManager.enable_default_callbacks(enable_warm_start=False)
+
+
 def to_sim_quat(q_wxyz: np.ndarray) -> np.ndarray:
     q = np.asarray(q_wxyz, dtype=np.float64)
     return q if _QUAT_ORDER == "wxyz" else q[..., [1, 2, 3, 0]]
@@ -114,6 +126,14 @@ def camera_pose_ros(cam):
     pos = to_numpy(d.pos_w)
     quat = to_numpy(_first_attr(d, ["quat_w_ros", "quat_w_opencv"]))
     return pos.astype(np.float64), from_sim_quat(quat)
+
+
+def use_usd_camera_view(cam):
+    """Make the camera's XformPrimView read/write poses through USD instead of Fabric. On the GB10 / Isaac Sim 6.0
+    build, Fabric world-matrix writes don't take effect: the camera stays at its spawn pose in render and readback."""
+    view = getattr(cam, "_view", None)
+    if view is not None and getattr(view, "_use_fabric", False):
+        view._use_fabric = False
 
 
 def set_camera_poses(cam, pos: np.ndarray, quat_wxyz: np.ndarray, device):

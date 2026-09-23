@@ -118,7 +118,8 @@ def build_scene_cfg(cfg, part_assets, bin_asset, intr, layout: PoolLayout):
         data_types=["rgb", "distance_to_image_plane", "instance_id_segmentation_fast"],
         spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
             intrinsic_matrix=intr.K.flatten().tolist(), width=intr.width, height=intr.height, clipping_range=(near, far)),
-        width=intr.width, height=intr.height, colorize_instance_id_segmentation=False)
+        width=intr.width, height=intr.height, colorize_instance_id_segmentation=False,
+        update_latest_camera_pose=True)  # GT uses the pose read back after each move; default only reads it at init
 
     if cfg.run.get("save_overview_every", 0) is not None:
         sc.overview = CameraCfg(

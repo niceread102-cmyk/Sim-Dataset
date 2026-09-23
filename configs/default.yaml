@@ -4,8 +4,9 @@
 defaults: [cameras/phoxi_m, robots/ur10_suction]
 
 sim:
-  experience: null          # e.g. ~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.full.kit (null = Isaac Lab default)
-  headless: true
+  experience: ~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit  # Isaac Sim Base 6.0.0. The Full kit's extra
+                            # extensions (anim/people, physics variant switcher) crash or freeze scripted runs on this machine
+  headless: false           # false = open the Isaac Sim window
   device: cuda:0
   physics_dt: 0.005         # s; 200 Hz is plenty for resting piles
   seed: 0
@@ -19,7 +20,8 @@ run:
   num_scenes: 200           # settled piles per shard (rounded up to a multiple of num_envs)
   views_per_scene: 4        # camera viewpoints rendered per settled pile (physics paid once)
   shard_id: 0               # set by scripts/launch_multi_gpu.py
-  save_overview_every: 25   # whole-scene overview image every N batches (0 = only the first)
+  save_overview_every: null # null = no overview camera. On the GB10 machine the extra (non-tiled) overview Camera
+                            # causes a CUDA illegal memory access on GPU physics. Otherwise: every N batches (0 = only the first)
   save_viz_every: 1         # annotated bin image every N scenes (0 = off)
   writer_threads: 8
   log_every_s: 5.0
@@ -41,7 +43,7 @@ bin:
   color: [0.12, 0.25, 0.55]
 
 parts:                      # one or more part types; each scene samples a count per type
-  - config: parts/gear_example.yaml
+  - config: parts/side_plate.yaml
     count: [8, 25]
 
 loading:

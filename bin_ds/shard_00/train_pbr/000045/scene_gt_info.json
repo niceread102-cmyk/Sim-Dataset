@@ -1,0 +1,802 @@
+{
+ "0": [
+  {
+   "bbox_obj": [
+    235,
+    224,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    235,
+    224,
+    80,
+    81
+   ],
+   "px_count_all": 4904,
+   "px_count_valid": 3879,
+   "px_count_visib": 4360,
+   "visib_fract": 0.8890701468189234
+  },
+  {
+   "bbox_obj": [
+    231,
+    511,
+    84,
+    83
+   ],
+   "bbox_visib": [
+    232,
+    512,
+    82,
+    81
+   ],
+   "px_count_all": 4957,
+   "px_count_valid": 3988,
+   "px_count_visib": 4731,
+   "visib_fract": 0.9544079080088763
+  },
+  {
+   "bbox_obj": [
+    735,
+    375,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    735,
+    375,
+    82,
+    81
+   ],
+   "px_count_all": 4954,
+   "px_count_valid": 4133,
+   "px_count_visib": 4722,
+   "visib_fract": 0.953169156237384
+  },
+  {
+   "bbox_obj": [
+    310,
+    217,
+    83,
+    83
+   ],
+   "bbox_visib": [
+    311,
+    218,
+    81,
+    81
+   ],
+   "px_count_all": 4914,
+   "px_count_valid": 3908,
+   "px_count_visib": 4669,
+   "visib_fract": 0.9501424501424501
+  },
+  {
+   "bbox_obj": [
+    767,
+    246,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    767,
+    246,
+    83,
+    81
+   ],
+   "px_count_all": 4939,
+   "px_count_valid": 4067,
+   "px_count_visib": 4722,
+   "visib_fract": 0.956063980562867
+  },
+  {
+   "bbox_obj": [
+    493,
+    201,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    493,
+    201,
+    81,
+    81
+   ],
+   "px_count_all": 4832,
+   "px_count_valid": 4044,
+   "px_count_visib": 4609,
+   "visib_fract": 0.9538493377483444
+  },
+  {
+   "bbox_obj": [
+    125,
+    332,
+    84,
+    82
+   ],
+   "bbox_visib": [
+    125,
+    333,
+    83,
+    80
+   ],
+   "px_count_all": 5037,
+   "px_count_valid": 4344,
+   "px_count_visib": 4787,
+   "visib_fract": 0.9503672821123684
+  },
+  {
+   "bbox_obj": [
+    659,
+    413,
+    83,
+    83
+   ],
+   "bbox_visib": [
+    659,
+    414,
+    82,
+    81
+   ],
+   "px_count_all": 4923,
+   "px_count_valid": 3892,
+   "px_count_visib": 4685,
+   "visib_fract": 0.9516554946171034
+  },
+  {
+   "bbox_obj": [
+    308,
+    579,
+    82,
+    83
+   ],
+   "bbox_visib": [
+    308,
+    579,
+    81,
+    82
+   ],
+   "px_count_all": 4969,
+   "px_count_valid": 4279,
+   "px_count_visib": 4743,
+   "visib_fract": 0.9545180116723687
+  },
+  {
+   "bbox_obj": [
+    440,
+    444,
+    82,
+    83
+   ],
+   "bbox_visib": [
+    440,
+    445,
+    81,
+    81
+   ],
+   "px_count_all": 4851,
+   "px_count_valid": 3779,
+   "px_count_visib": 4599,
+   "visib_fract": 0.948051948051948
+  },
+  {
+   "bbox_obj": [
+    171,
+    256,
+    82,
+    83
+   ],
+   "bbox_visib": [
+    172,
+    257,
+    80,
+    81
+   ],
+   "px_count_all": 4993,
+   "px_count_valid": 4073,
+   "px_count_visib": 4761,
+   "visib_fract": 0.9535349489284999
+  }
+ ],
+ "1": [
+  {
+   "bbox_obj": [
+    243,
+    268,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    243,
+    268,
+    80,
+    82
+   ],
+   "px_count_all": 4903,
+   "px_count_valid": 3843,
+   "px_count_visib": 4341,
+   "visib_fract": 0.8853763002243524
+  },
+  {
+   "bbox_obj": [
+    258,
+    556,
+    83,
+    84
+   ],
+   "bbox_visib": [
+    258,
+    556,
+    82,
+    83
+   ],
+   "px_count_all": 5013,
+   "px_count_valid": 4019,
+   "px_count_visib": 4778,
+   "visib_fract": 0.9531218831039298
+  },
+  {
+   "bbox_obj": [
+    756,
+    385,
+    84,
+    83
+   ],
+   "bbox_visib": [
+    756,
+    385,
+    84,
+    82
+   ],
+   "px_count_all": 5136,
+   "px_count_valid": 4274,
+   "px_count_visib": 4880,
+   "visib_fract": 0.9501557632398754
+  },
+  {
+   "bbox_obj": [
+    317,
+    256,
+    83,
+    83
+   ],
+   "bbox_visib": [
+    318,
+    257,
+    82,
+    81
+   ],
+   "px_count_all": 4936,
+   "px_count_valid": 3835,
+   "px_count_visib": 4666,
+   "visib_fract": 0.9452998379254457
+  },
+  {
+   "bbox_obj": [
+    779,
+    252,
+    85,
+    83
+   ],
+   "bbox_visib": [
+    779,
+    252,
+    84,
+    83
+   ],
+   "px_count_all": 5100,
+   "px_count_valid": 4224,
+   "px_count_visib": 4887,
+   "visib_fract": 0.9582352941176471
+  },
+  {
+   "bbox_obj": [
+    499,
+    227,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    499,
+    227,
+    81,
+    82
+   ],
+   "px_count_all": 4908,
+   "px_count_valid": 4074,
+   "px_count_visib": 4659,
+   "visib_fract": 0.9492665036674817
+  },
+  {
+   "bbox_obj": [
+    141,
+    384,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    142,
+    384,
+    81,
+    81
+   ],
+   "px_count_all": 5002,
+   "px_count_valid": 4344,
+   "px_count_visib": 4777,
+   "visib_fract": 0.9550179928028788
+  },
+  {
+   "bbox_obj": [
+    681,
+    429,
+    85,
+    84
+   ],
+   "bbox_visib": [
+    681,
+    429,
+    84,
+    83
+   ],
+   "px_count_all": 5084,
+   "px_count_valid": 4037,
+   "px_count_visib": 4839,
+   "visib_fract": 0.9518095987411487
+  },
+  {
+   "bbox_obj": [
+    339,
+    619,
+    82,
+    84
+   ],
+   "bbox_visib": [
+    339,
+    619,
+    81,
+    83
+   ],
+   "px_count_all": 5070,
+   "px_count_valid": 4265,
+   "px_count_visib": 4833,
+   "visib_fract": 0.9532544378698224
+  },
+  {
+   "bbox_obj": [
+    462,
+    475,
+    83,
+    84
+   ],
+   "bbox_visib": [
+    462,
+    475,
+    82,
+    83
+   ],
+   "px_count_all": 4950,
+   "px_count_valid": 3892,
+   "px_count_visib": 4707,
+   "visib_fract": 0.9509090909090909
+  },
+  {
+   "bbox_obj": [
+    182,
+    305,
+    81,
+    82
+   ],
+   "bbox_visib": [
+    182,
+    305,
+    80,
+    82
+   ],
+   "px_count_all": 4950,
+   "px_count_valid": 4064,
+   "px_count_visib": 4739,
+   "visib_fract": 0.9573737373737373
+  }
+ ],
+ "2": [
+  {
+   "bbox_obj": [
+    230,
+    246,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    230,
+    246,
+    80,
+    82
+   ],
+   "px_count_all": 4942,
+   "px_count_valid": 3898,
+   "px_count_visib": 4393,
+   "visib_fract": 0.8889113719142048
+  },
+  {
+   "bbox_obj": [
+    239,
+    535,
+    83,
+    84
+   ],
+   "bbox_visib": [
+    239,
+    535,
+    83,
+    83
+   ],
+   "px_count_all": 5036,
+   "px_count_valid": 4065,
+   "px_count_visib": 4821,
+   "visib_fract": 0.9573073868149324
+  },
+  {
+   "bbox_obj": [
+    742,
+    374,
+    85,
+    83
+   ],
+   "bbox_visib": [
+    742,
+    374,
+    84,
+    82
+   ],
+   "px_count_all": 5142,
+   "px_count_valid": 4279,
+   "px_count_visib": 4893,
+   "visib_fract": 0.9515752625437572
+  },
+  {
+   "bbox_obj": [
+    305,
+    235,
+    83,
+    83
+   ],
+   "bbox_visib": [
+    305,
+    236,
+    82,
+    81
+   ],
+   "px_count_all": 4973,
+   "px_count_valid": 3996,
+   "px_count_visib": 4737,
+   "visib_fract": 0.9525437361753468
+  },
+  {
+   "bbox_obj": [
+    768,
+    241,
+    85,
+    84
+   ],
+   "bbox_visib": [
+    768,
+    241,
+    84,
+    83
+   ],
+   "px_count_all": 5138,
+   "px_count_valid": 4252,
+   "px_count_visib": 4901,
+   "visib_fract": 0.9538731023744648
+  },
+  {
+   "bbox_obj": [
+    487,
+    210,
+    83,
+    83
+   ],
+   "bbox_visib": [
+    488,
+    210,
+    81,
+    82
+   ],
+   "px_count_all": 4958,
+   "px_count_valid": 4116,
+   "px_count_visib": 4712,
+   "visib_fract": 0.9503832190399355
+  },
+  {
+   "bbox_obj": [
+    125,
+    360,
+    84,
+    82
+   ],
+   "bbox_visib": [
+    126,
+    360,
+    82,
+    81
+   ],
+   "px_count_all": 5078,
+   "px_count_valid": 4407,
+   "px_count_visib": 4830,
+   "visib_fract": 0.9511618747538401
+  },
+  {
+   "bbox_obj": [
+    666,
+    416,
+    85,
+    84
+   ],
+   "bbox_visib": [
+    666,
+    417,
+    84,
+    82
+   ],
+   "px_count_all": 5103,
+   "px_count_valid": 3973,
+   "px_count_visib": 4835,
+   "visib_fract": 0.9474818734077993
+  },
+  {
+   "bbox_obj": [
+    319,
+    600,
+    83,
+    84
+   ],
+   "bbox_visib": [
+    319,
+    600,
+    82,
+    83
+   ],
+   "px_count_all": 5092,
+   "px_count_valid": 4356,
+   "px_count_visib": 4864,
+   "visib_fract": 0.9552238805970149
+  },
+  {
+   "bbox_obj": [
+    445,
+    458,
+    83,
+    84
+   ],
+   "bbox_visib": [
+    445,
+    458,
+    82,
+    83
+   ],
+   "px_count_all": 4983,
+   "px_count_valid": 3900,
+   "px_count_visib": 4727,
+   "visib_fract": 0.9486253261087698
+  },
+  {
+   "bbox_obj": [
+    168,
+    282,
+    81,
+    82
+   ],
+   "bbox_visib": [
+    168,
+    282,
+    80,
+    82
+   ],
+   "px_count_all": 5004,
+   "px_count_valid": 4126,
+   "px_count_visib": 4796,
+   "visib_fract": 0.9584332533972821
+  }
+ ],
+ "3": [
+  {
+   "bbox_obj": [
+    230,
+    224,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    231,
+    224,
+    79,
+    81
+   ],
+   "px_count_all": 4869,
+   "px_count_valid": 3829,
+   "px_count_visib": 4313,
+   "visib_fract": 0.8858081741630724
+  },
+  {
+   "bbox_obj": [
+    244,
+    509,
+    82,
+    81
+   ],
+   "bbox_visib": [
+    244,
+    509,
+    81,
+    80
+   ],
+   "px_count_all": 4783,
+   "px_count_valid": 3864,
+   "px_count_visib": 4574,
+   "visib_fract": 0.9563035751620322
+  },
+  {
+   "bbox_obj": [
+    734,
+    349,
+    83,
+    81
+   ],
+   "bbox_visib": [
+    735,
+    349,
+    81,
+    81
+   ],
+   "px_count_all": 4895,
+   "px_count_valid": 4088,
+   "px_count_visib": 4660,
+   "visib_fract": 0.9519918283963228
+  },
+  {
+   "bbox_obj": [
+    305,
+    214,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    305,
+    214,
+    82,
+    81
+   ],
+   "px_count_all": 4874,
+   "px_count_valid": 3881,
+   "px_count_visib": 4622,
+   "visib_fract": 0.948297086581863
+  },
+  {
+   "bbox_obj": [
+    761,
+    219,
+    83,
+    82
+   ],
+   "bbox_visib": [
+    761,
+    219,
+    82,
+    81
+   ],
+   "px_count_all": 4941,
+   "px_count_valid": 4075,
+   "px_count_visib": 4708,
+   "visib_fract": 0.9528435539364501
+  },
+  {
+   "bbox_obj": [
+    485,
+    188,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    486,
+    188,
+    80,
+    81
+   ],
+   "px_count_all": 4814,
+   "px_count_valid": 3977,
+   "px_count_visib": 4563,
+   "visib_fract": 0.9478604071458246
+  },
+  {
+   "bbox_obj": [
+    129,
+    338,
+    82,
+    81
+   ],
+   "bbox_visib": [
+    129,
+    338,
+    82,
+    80
+   ],
+   "px_count_all": 4924,
+   "px_count_valid": 4253,
+   "px_count_visib": 4683,
+   "visib_fract": 0.9510560519902518
+  },
+  {
+   "bbox_obj": [
+    661,
+    391,
+    82,
+    82
+   ],
+   "bbox_visib": [
+    661,
+    392,
+    81,
+    80
+   ],
+   "px_count_all": 4843,
+   "px_count_valid": 3798,
+   "px_count_visib": 4593,
+   "visib_fract": 0.948379103861243
+  },
+  {
+   "bbox_obj": [
+    323,
+    571,
+    81,
+    81
+   ],
+   "bbox_visib": [
+    323,
+    571,
+    80,
+    80
+   ],
+   "px_count_all": 4806,
+   "px_count_valid": 4079,
+   "px_count_visib": 4578,
+   "visib_fract": 0.9525593008739076
+  },
+  {
+   "bbox_obj": [
+    445,
+    433,
+    82,
+    81
+   ],
+   "bbox_visib": [
+    446,
+    433,
+    80,
+    80
+   ],
+   "px_count_all": 4755,
+   "px_count_valid": 3726,
+   "px_count_visib": 4520,
+   "visib_fract": 0.9505783385909569
+  },
+  {
+   "bbox_obj": [
+    170,
+    260,
+    80,
+    82
+   ],
+   "bbox_visib": [
+    170,
+    260,
+    80,
+    81
+   ],
+   "px_count_all": 4908,
+   "px_count_valid": 4023,
+   "px_count_visib": 4691,
+   "visib_fract": 0.9557864710676447
+  }
+ ]
+}

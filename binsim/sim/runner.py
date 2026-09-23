@@ -66,6 +66,7 @@ class Generator:
         # ---- simulation ----
         self.device = cfg.sim.get("device", "cuda:0")
         C.detect_quat_order(cfg.sim.get("quat_order", "auto"))
+        C.disable_isaacsim_physics_warm_start()
         dt = float(cfg.sim.get("physics_dt", 0.005))
         self.sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=dt, device=self.device))
         self.dt = dt
@@ -79,6 +80,7 @@ class Generator:
         self.slots = [self.scene[f"part_{s:03d}"] for s in range(len(self.layout.slot_type))]
         self.bin = self.scene["bin"]
         self.cam = self.scene["cam"]
+        C.use_usd_camera_view(self.cam)
         self.overview = self._entity("overview")
         self.robot = self._entity("robot")
         self.env_origins = C.to_numpy(self.scene.env_origins).astype(np.float64)

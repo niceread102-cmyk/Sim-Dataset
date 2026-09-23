@@ -1,0 +1,31 @@
+{
+  "source": "/home/v/stl/SIDE-PLATE.stl",
+  "settings": {
+    "units": "mm",
+    "recenter": true,
+    "mass_kg": 0.1,
+    "friction": 0.5,
+    "restitution": 0.0,
+    "collision": "convexDecomposition",
+    "max_convex_hulls": 32,
+    "color": [
+      0.28571427,
+      0.2857114,
+      0.2857114
+    ],
+    "color_tint": [
+      0.66023165,
+      0.66022503,
+      0.66022503
+    ],
+    "roughness": 0.5,
+    "metallic": 1.0,
+    "step_tolerance_mm": null
+  },
+  "faces": 16318,
+  "extents_m": [
+    0.05397792243957519,
+    0.05397608375549316,
+    0.009600050019344053
+  ]
+}

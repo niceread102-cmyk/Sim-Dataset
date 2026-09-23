@@ -4,3 +4,4 @@ __pycache__/
 assets_cache/
 captures/
 *.egg-info/
+.venv/

@@ -1,0 +1,22 @@
+{
+ "mode": "layers",
+ "slots": [
+  10,
+  11,
+  12,
+  13,
+  14,
+  15
+ ],
+ "types": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "removed": 0,
+ "seed": 1,
+ "num_valid_grasps": 18
+}
