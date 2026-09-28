@@ -4,7 +4,8 @@
   camera.json, models/{obj_000001.ply, models_info.json}
   train_pbr/<scene_id:06d>/
     rgb/<im:06d>.png  depth/<im:06d>.png (uint16, * depth_scale = mm)  [depth_clean/ ...]
-    mask/<im>_<gt:06d>.png  mask_visib/<im>_<gt:06d>.png
+    mask/<im>_<gt:06d>.png  mask_visib/<im>_<gt:06d>.png  (outputs.full_masks / outputs.mask_format: per_part)
+    mask_visib_inst/<im>.png  (outputs.mask_format: instance; uint16, pixel = gt index + 1, 0 = no part)
     scene_camera.json  scene_gt.json  scene_gt_info.json  [scene_gt_coco.json]
     grasps/<im>.json   poses/<im>.csv      (binsim extras)
 The scene's "world" frame is the BIN frame (bottom center of the bin, z up).
@@ -25,10 +26,10 @@ def save_png(path: str, arr: np.ndarray, compress: int = 3):
     Image.fromarray(arr).save(path, compress_level=compress)
 
 
-def _json(path: str, obj):
+def _json(path: str, obj, indent: int | None = 1):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(obj, f, indent=1)
+        json.dump(obj, f, indent=indent)
     os.replace(tmp, path)
 
 
@@ -69,32 +70,45 @@ class SceneWriter:
         self.dir = os.path.join(root, "train_pbr", f"{scene_id:06d}")
         self.depth_scale = depth_scale
         self.save_clean_depth = save_clean_depth
-        subdirs = ["rgb", "depth", "mask", "mask_visib", "grasps", "poses"] + (["depth_clean"] if save_clean_depth else [])
+        subdirs = ["rgb", "depth", "grasps", "poses"] + (["depth_clean"] if save_clean_depth else [])
         for s in subdirs:
             os.makedirs(os.path.join(self.dir, s), exist_ok=True)
+        self._made = set(subdirs)
         self.scene_camera, self.scene_gt, self.scene_gt_info = {}, {}, {}
+
+    def _sub(self, name: str) -> str:
+        d = os.path.join(self.dir, name)
+        if name not in self._made:
+            os.makedirs(d, exist_ok=True)
+            self._made.add(name)
+        return d
 
     def _depth_u16(self, depth_m):
         return np.clip(np.round(depth_m * 1000.0 / self.depth_scale), 0, 65535).astype(np.uint16)
 
     def add_view(self, im_id: int, rgb, depth_m, K, T_cam_w_R, T_cam_w_t_mm, gts, infos, masks_full, masks_visib,
-                 depth_clean_m=None):
+                 depth_clean_m=None, inst_visib=None):
+        """masks_full / masks_visib: per-gt (H, W) bool masks (None or None entries = not written);
+        inst_visib: (H, W) gt index per pixel (-1 = no part), written as one uint16 PNG (gt index + 1)."""
         tag = f"{im_id:06d}"
         save_png(os.path.join(self.dir, "rgb", f"{tag}.png"), rgb)
         save_png(os.path.join(self.dir, "depth", f"{tag}.png"), self._depth_u16(depth_m))
         if self.save_clean_depth and depth_clean_m is not None:
             save_png(os.path.join(self.dir, "depth_clean", f"{tag}.png"), self._depth_u16(depth_clean_m))
-        for k, (mf, mv) in enumerate(zip(masks_full, masks_visib)):
-            save_png(os.path.join(self.dir, "mask", f"{tag}_{k:06d}.png"), mf.astype(np.uint8) * 255, 1)
-            save_png(os.path.join(self.dir, "mask_visib", f"{tag}_{k:06d}.png"), mv.astype(np.uint8) * 255, 1)
+        if inst_visib is not None:
+            save_png(os.path.join(self._sub("mask_visib_inst"), f"{tag}.png"), (np.asarray(inst_visib) + 1).astype(np.uint16))
+        for sub, masks in (("mask", masks_full), ("mask_visib", masks_visib)):
+            for k, m in enumerate(masks or []):
+                if m is not None:
+                    save_png(os.path.join(self._sub(sub), f"{tag}_{k:06d}.png"), m.astype(np.uint8) * 255, 1)
         self.scene_camera[str(im_id)] = {"cam_K": np.asarray(K).flatten().tolist(), "depth_scale": self.depth_scale,
                                          "cam_R_w2c": np.asarray(T_cam_w_R).flatten().tolist(),
                                          "cam_t_w2c": np.asarray(T_cam_w_t_mm).tolist()}
         self.scene_gt[str(im_id)] = gts
         self.scene_gt_info[str(im_id)] = infos
 
-    def write_json(self, name: str, obj):
-        _json(os.path.join(self.dir, name), obj)
+    def write_json(self, name: str, obj, indent: int | None = 1):
+        _json(os.path.join(self.dir, name), obj, indent)
 
     def finalize(self):
         _json(os.path.join(self.dir, "scene_camera.json"), self.scene_camera)

@@ -112,6 +112,55 @@ def apply_depth_noise(depth_m: np.ndarray, K: np.ndarray, cam_cfg, rng: np.rando
     return np.where(drop, 0.0, depth)
 
 
+def normalize_texture(img: np.ndarray, percentiles=99.0) -> np.ndarray:
+    """8-bit texture from a rendered / raw image (uint8, 3 channels in -> 3 channels out).
+
+    percentiles = p (one number): exposure - gain only, the p-th percentile of the brightness maps to 235 (black stays
+    black, colours keep their ratios; like a camera's auto exposure). [lo, hi]: stretch lo..hi to 0..255 (much
+    harder contrast; colours saturate).
+
+    Raw PhoXi textures are floats with an arbitrary scale and must be converted to 8 bit for a network; apply this
+    SAME function to real textures at inference as camera.texture_normalize does to the rendered ones, so both
+    domains share one intensity mapping (absolute brightness of the simulation does not matter then)."""
+    x = np.asarray(img, np.float32)
+    ref = x[..., :3].mean(-1) if x.ndim == 3 else x  # colour: one mapping for all channels (keeps the hue)
+    if np.ndim(percentiles) == 0:
+        y = np.clip(x * (235.0 / max(float(np.percentile(ref, float(percentiles))), 1e-6)), 0, 255).astype(np.uint8)
+    else:
+        lo, hi = np.percentile(ref, percentiles)
+        y = np.clip((x - lo) * (255.0 / max(float(hi - lo), 1e-6)), 0, 255).astype(np.uint8)
+    return np.repeat(y[..., None], 3, axis=-1) if y.ndim == 2 else y
+
+
+def texture_brightness(img: np.ndarray, factor_range, rng: np.random.Generator) -> np.ndarray:
+    """Overall brightness of one image: x a factor drawn from factor_range (<1 darker, >1 brighter, clipped at 255).
+    texture_normalize maps every image to the same 0..255 span, so without this all images end up equally bright."""
+    from .config import as_range
+    f = float(rng.uniform(*as_range(factor_range)))
+    return np.clip(np.asarray(img, np.float32) * f, 0, 255).round().astype(np.uint8)
+
+
+def texture_noise(img: np.ndarray, tcfg, rng: np.random.Generator) -> np.ndarray:
+    """Lens blur + sensor noise on the 8-bit texture (camera.texture_noise), strength drawn per image:
+    blur_px = gaussian sigma in pixels, gauss_std = noise in gray levels (values or [lo, hi] ranges)."""
+    from scipy import ndimage
+
+    from .config import as_range
+    x = np.asarray(img, np.float32)
+    gray = x.ndim == 3 and np.array_equal(x[..., 0], x[..., 1]) and np.array_equal(x[..., 1], x[..., 2])
+    g = x[..., :1] if gray else (x if x.ndim == 3 else x[..., None])  # gray: one channel, copied back at the end
+    b = float(rng.uniform(*as_range(tcfg.get("blur_px", 0.0))))
+    if b > 0.05:
+        g = ndimage.gaussian_filter(g, (b, b, 0))
+    s = float(rng.uniform(*as_range(tcfg.get("gauss_std", 0.0))))
+    if s > 0:
+        g = g + rng.normal(0.0, s, g.shape)
+    y = np.clip(np.round(g), 0, 255).astype(np.uint8)
+    if gray:
+        return np.repeat(y, x.shape[2], axis=-1)
+    return y if x.ndim == 3 else y[..., 0]
+
+
 def to_gray(rgb: np.ndarray) -> np.ndarray:
     """PhoXi texture is a grayscale intensity image; keep 3 channels for tooling compatibility."""
     g = (rgb[..., :3].astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)).clip(0, 255).astype(np.uint8)

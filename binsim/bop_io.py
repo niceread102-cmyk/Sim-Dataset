@@ -37,9 +37,17 @@ class BopScene:
 
     def mask(self, im_id, k, visib=True):
         sub = "mask_visib" if visib else "mask"
-        return np.array(Image.open(os.path.join(self.dir, sub, f"{im_id:06d}_{k:06d}.png"))) > 127
+        p = os.path.join(self.dir, sub, f"{im_id:06d}_{k:06d}.png")
+        if visib and not os.path.exists(p):
+            return self.instance_map(im_id) == k
+        return np.array(Image.open(p)) > 127
 
     def instance_map(self, im_id):
+        p = os.path.join(self.dir, "mask_visib_inst", f"{im_id:06d}.png")
+        if os.path.exists(p):  # outputs.mask_format: instance (uint16, gt index + 1)
+            if getattr(self, "_inst_cache", (None,))[0] != im_id:
+                self._inst_cache = (im_id, np.array(Image.open(p)).astype(np.int32) - 1)
+            return self._inst_cache[1]
         n = len(self.gt[str(im_id)])
         inst = None
         for k in range(n):

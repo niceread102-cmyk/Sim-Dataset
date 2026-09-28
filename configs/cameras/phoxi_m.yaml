@@ -8,6 +8,15 @@ camera:
   intrinsics: {fx: 2500.0, fy: 2500.0, cx: 1032.0, cy: 772.0}
   depth_range_m: [0.458, 1.118] # scanning range; depth outside is invalid (0), like the real sensor
   image_mode: gray              # gray (PhoXi texture) | rgb
+  texture_normalize: 99         # exposure per image: gain so the 99th percentile -> 235 (black stays black).
+                                # [lo, hi] = stretch those percentiles to 0..255 (hard contrast); null = raw render.
+                                # Real PhoXi textures are raw floats: convert them with the same
+                                # binsim.noise.normalize_texture(img, 99) before inference
+  texture_brightness: [0.6, 1.3]  # then x this factor, drawn per image: <1 darker, >1 brighter (null = off).
+                                  # normalize alone makes every image equally bright
+  texture_noise:                # after texture_normalize, strength drawn per image (values or [lo, hi])
+    blur_px: [0.0, 0.7]         # gaussian blur sigma in pixels (lens, slight defocus)
+    gauss_std: [0.5, 3.0]       # sensor noise in gray levels
   mount:
     height_above_rim_m: 0.60    # camera height above the bin rim (~0.85 m to the floor: whole 600x400 bin in view)
     offset_m: [0.0, 0.0, 0.0]   # xy offset from the bin center (bin frame)

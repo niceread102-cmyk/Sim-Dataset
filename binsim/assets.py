@@ -220,6 +220,17 @@ def _bind(prim, vis, phys):
     api.Bind(phys, UsdShade.Tokens.weakerThanDescendants, "physics")
 
 
+def _set_physx(prim, api: str, ns: str, attrs: dict):
+    """Apply a PhysX schema and author the given attributes; unset (None) values keep PhysX defaults."""
+    vals = {k: v for k, v in attrs.items() if v[1] is not None}
+    if not vals:
+        return
+    prim.AddAppliedSchema(api)
+    cast = {"float": float, "int": int, "bool": bool}
+    for name, (typ, v) in vals.items():
+        prim.CreateAttribute(f"{ns}:{name}", _sdf_type(typ)).Set(cast[typ](v))
+
+
 def write_part_usd(path: str, mesh: trimesh.Trimesh, part_cfg):
     from pxr import UsdGeom, UsdPhysics
     stage = _stage(path)
@@ -229,6 +240,19 @@ def write_part_usd(path: str, mesh: trimesh.Trimesh, part_cfg):
     UsdPhysics.MassAPI.Apply(root).CreateMassAttr(float(part_cfg.get("mass_kg", 0.05)))
     geom = _add_mesh(stage, "/Part/geometry", mesh, part_cfg.get("collision", "convexDecomposition"),
                      {"max_convex_hulls": part_cfg.get("max_convex_hulls", 32)})
+    # PhysX settings live in the USD so every loader (Isaac Lab scene, Isaac Sim script, GUI) gets them
+    px = part_cfg.get("physx", {}) or {}
+    _set_physx(root, "PhysxRigidBodyAPI", "physxRigidBody", {
+        "maxDepenetrationVelocity": ("float", px.get("max_depenetration_velocity")),
+        "maxLinearVelocity": ("float", px.get("max_linear_velocity")),
+        "solverPositionIterationCount": ("int", px.get("solver_position_iterations")),
+        "solverVelocityIterationCount": ("int", px.get("solver_velocity_iterations")),
+        "enableCCD": ("bool", px.get("enable_ccd")),
+    })
+    _set_physx(geom, "PhysxCollisionAPI", "physxCollision", {
+        "contactOffset": ("float", px.get("contact_offset_m")),
+        "restOffset": ("float", px.get("rest_offset_m")),
+    })
     rough, metal = part_cfg.get("roughness", 0.5), part_cfg.get("metallic", 0.0)
     rough = float(np.mean(rough)) if isinstance(rough, (list, tuple)) else float(rough)
     metal = float(np.mean(metal)) if isinstance(metal, (list, tuple)) else float(metal)
@@ -275,7 +299,7 @@ def write_bin_usd(path: str, meshes: list[trimesh.Trimesh], bin_cfg, approximati
 def prepare_part(part_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
     settings = {k: part_cfg.get(k) for k in ("units", "recenter", "mass_kg", "friction", "restitution",
                                              "collision", "max_convex_hulls", "color", "color_tint", "roughness",
-                                             "metallic", "step_tolerance_mm")}
+                                             "metallic", "step_tolerance_mm", "physx")}
     key = _hash(part_cfg["mesh"], settings)
     d = os.path.join(cache_dir, f"{part_cfg['name']}_{key}")
     usd, stl, ply = (os.path.join(d, f) for f in ("part.usd", "model.stl", "model_mm.ply"))

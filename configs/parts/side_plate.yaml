@@ -9,6 +9,10 @@ friction: 0.5             # SIDE_PLATE.usd has no physics material -> PhysX defa
 restitution: 0.0
 collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
 max_convex_hulls: 32      # same as SIDE_PLATE.usd
+# Optional PhysX settings written into part.usd (unset = PhysX defaults). Tested with generate.py (Isaac Lab
+# backend): contact_offset_m 0.002 / max_depenetration_velocity 0.5 / 16 iterations made parts escape MORE.
+# physx: {contact_offset_m: 0.002, rest_offset_m: 0.0, max_depenetration_velocity: 0.5, max_linear_velocity: 5.0,
+#         solver_position_iterations: 16, solver_velocity_iterations: 1, enable_ccd: false}
 # OmniPBR values copied from SIDE_PLATE.usd (Base Color, Color Tint, Roughness Amount, Metallic Amount)
 color: [0.28571427, 0.2857114, 0.2857114]
 color_tint: [0.66023165, 0.66022503, 0.66022503]
@@ -23,6 +27,8 @@ symmetry: {axis: [0, 0, 1], order: 2, flip: false}
 layer_rpy_deg: [0, 0, 0]
 
 grasps:
+  # Suction points sampled automatically on flat patches of the mesh (stored in the asset cache).
   suction_auto: {num: 48, seed: 0}
-  suction: []
-  parallel_jaw: []
+  # Hand-defined grasps in the part frame (after recenter), meters:
+  suction: []               # - {pos: [0, 0, 0.005], normal: [0, 0, 1]}
+  parallel_jaw: []          # - {pos: [0, 0, 0], rpy_deg: [0, 0, 0], width_m: 0.03}

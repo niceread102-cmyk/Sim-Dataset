@@ -9,7 +9,7 @@ import pytest  # noqa: E402
 
 from binsim.config import load_config  # noqa: E402
 
-CONFIG = os.path.join(REPO, "configs", "default.yaml")
+CONFIG = os.path.join(REPO, "tests", "config_test.yaml")  # default.yaml + what the tests assume
 
 
 @pytest.fixture

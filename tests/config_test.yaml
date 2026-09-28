@@ -1,0 +1,10 @@
+# Test config: configs/default.yaml plus the settings the tests assume (example gear, grasp labels, amodal masks),
+# so running the tests never requires editing configs/default.yaml.
+defaults: [../configs/default.yaml]
+parts:
+  - config: ../configs/parts/gear_example.yaml
+    count: [8, 25]
+grasps:
+  enabled: true
+outputs:
+  full_masks: true

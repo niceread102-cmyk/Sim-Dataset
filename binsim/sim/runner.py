@@ -185,7 +185,7 @@ class Generator:
         modes = []
         for i in range(self.N):
             pos[:, i] = self.env_origins[i] + self.layout.park_pos
-            counts = sample_counts(self.cfg.parts, self.rng)
+            counts = sample_counts(self.cfg.parts, self.rng, self.cfg.loading)
             placements, mode = plan_scene(counts, self.geoms, self.bin_geom, self.cfg.loading, self.rng)
             modes.append(mode)
             next_slot = [list(s) for s in self.layout.type_slots]

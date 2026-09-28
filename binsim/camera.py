@@ -51,18 +51,25 @@ def rim_height(bin_cfg, bin_geom: BinGeom) -> float:
 
 
 def mount_eye_target(cam_cfg, bin_cfg, bin_geom: BinGeom):
-    """Nominal camera eye/target in the BIN frame."""
+    """Nominal camera eye, look-at target and image-up direction in the BIN frame.
+
+    `mount.T_bin_cam` (measured camera pose, e.g. from hand-eye calibration: 4x4 row-major, meters, OpenCV camera
+    axes, see scripts/camera_mount_from_calib.py) overrides height_above_rim_m / offset_m / look_at_m."""
     m = cam_cfg.get("mount", {})
+    if m.get("T_bin_cam") is not None:
+        T = np.asarray(m["T_bin_cam"], float).reshape(4, 4)
+        eye, z = T[:3, 3].copy(), T[:3, 2]
+        s = (bin_geom.floor_z - eye[2]) / z[2] if abs(z[2]) > 1e-6 else 1.0  # where the optical axis meets the floor
+        return eye, eye + z * s, -T[:3, 1]
     eye = np.array([*m.get("offset_m", [0, 0, 0])[:2], 0.0])
     eye[2] = rim_height(bin_cfg, bin_geom) + float(m.get("height_above_rim_m", 0.5)) + float(m.get("offset_m", [0, 0, 0])[2])
     target = np.asarray(m.get("look_at_m", [0, 0, 0]), float) + np.array([0, 0, bin_geom.floor_z])
-    return eye, target
+    return eye, target, np.asarray(m.get("image_up_world", [1, 0, 0]), float)
 
 
 def sample_view(cam_cfg, bin_cfg, bin_geom: BinGeom, rng, jitter: bool = True) -> np.ndarray:
     """4x4 camera-to-bin transform (OpenCV camera axes) for one view."""
-    eye, target = mount_eye_target(cam_cfg, bin_cfg, bin_geom)
-    up = cam_cfg.get("mount", {}).get("image_up_world", [1, 0, 0])
+    eye, target, up = mount_eye_target(cam_cfg, bin_cfg, bin_geom)
     roll = 0.0
     if jitter:
         j = cam_cfg.get("pose_jitter", {}) or {}

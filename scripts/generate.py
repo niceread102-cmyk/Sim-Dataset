@@ -47,6 +47,13 @@ cfg = load_config(args.config, args.overrides)
 if args.gui:
     cfg.sim.headless = False
 
+if cfg.sim.get("backend", "isaacsim") == "isaacsim":
+    # The Isaac Lab backend below throws parts out of the bin on the GB10 machine (measured: 23 of 88 escaped at
+    # 10-69 m/s); scripts/generate_isaacsim.py (legacy-style Isaac Sim calls) keeps them in. Same config/overrides.
+    target = os.path.join(REPO, "scripts", "generate_isaacsim.py")
+    extra = ["sim.headless=false"] if args.gui else (["--headless"] if args.headless else [])
+    os.execv(sys.executable, [sys.executable, target, "--config", args.config, *args.overrides, *extra])
+
 args.headless = bool(cfg.sim.get("headless", True))
 args.enable_cameras = True
 args.device = cfg.sim.get("device", "cuda:0")

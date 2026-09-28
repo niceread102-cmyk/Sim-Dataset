@@ -1,57 +1,69 @@
 # Bin-picking dataset experiment. Override any leaf on the CLI:
-#   python scripts/generate.py --config configs/default.yaml run.num_envs=32 loading.mode=layers
+# python scripts/generate.py --config configs/default.yaml run.num_envs=32 loading.mode=layers
 # Presets (camera / robot+gripper) are merged first; keys below override them.
 defaults: [cameras/phoxi_m, robots/ur10_suction]
 
+camera:                       # overrides of the camera preset above (configs/cameras/phoxi_m.yaml)
+  image_mode: rgb             # rgb = colour images (rgb/*.png) | gray = PhoXi monochrome texture
+
 sim:
+  backend: isaacsim           # isaacsim = scripts/generate_isaacsim.py (works here) | isaaclab = original Isaac Lab path
+                              # (on this machine parts explode out of the bin); scripts/generate.py follows this
   experience: ~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit  # Isaac Sim Base 6.0.0. The Full kit's extra
-                            # extensions (anim/people, physics variant switcher) crash or freeze scripted runs on this machine
-  headless: false           # false = open the Isaac Sim window
+                              # extensions (anim/people, physics variant switcher) crash or freeze scripted runs on this machine
+  headless: false             # false = open the Isaac Sim window
   device: cuda:0
-  physics_dt: 0.005         # s; 200 Hz is plenty for resting piles
+  physics_dt: 0.005           # s; 200 Hz is plenty for resting piles
   seed: 0
-  quat_order: auto          # auto | wxyz | xyzw — Isaac Lab <3 uses wxyz; set explicitly if poses look rotated
+  quat_order: auto            # auto | wxyz | xyzw — Isaac Lab <3 uses wxyz; set explicitly if poses look rotated
   render_during_settle: null  # null = only when running with a GUI (watching the pile fall); false is much faster
+  
 
 run:
   output_dir: ~/IsaacSim/captures/bin_ds
-  num_envs: 8               # bins simulated + rendered in parallel on one GPU
+  num_envs: 8                 # bins simulated + rendered in parallel on one GPU
   env_spacing_m: 4.0
-  num_scenes: 200           # settled piles per shard (rounded up to a multiple of num_envs)
-  views_per_scene: 4        # camera viewpoints rendered per settled pile (physics paid once)
-  shard_id: 0               # set by scripts/launch_multi_gpu.py
-  save_overview_every: null # null = no overview camera. On the GB10 machine the extra (non-tiled) overview Camera
-                            # causes a CUDA illegal memory access on GPU physics. Otherwise: every N batches (0 = only the first)
-  save_viz_every: 1         # annotated bin image every N scenes (0 = off)
-  writer_threads: 8
+  num_scenes: 1000            # settled piles per shard (rounded up to a multiple of num_envs); 500 x 100 views = 50k images
+  views_per_scene: 100        # camera viewpoints rendered per settled pile (physics paid once; pose spread:
+                              # camera.pose_jitter in configs/cameras/*.yaml)
+  shard_id: 0                 # set by scripts/launch_multi_gpu.py
+  save_overview_every: null   # null = no overview camera. On the GB10 machine the extra (non-tiled) overview Camera
+                              # causes a CUDA illegal memory access on GPU physics. Otherwise: every N batches (0 = only the first)
+  save_viz_every: 1           # annotated bin image every N scenes (1 = every scene, 0 = off); ~1 s per view with ~300 parts
+  save_viz_views: 1           # views of such a scene that get the annotated image (0 = all)
+  writer_threads: 3           # isaacsim backend: piles being labelled/saved in the background while the next one
+                              # settles (each holds its views in RAM, ~1 GB per 100 views)
   log_every_s: 5.0
 
 assets:
   cache_dir: ../assets_cache  # converted STL/USD/PLY (keyed by source hash + settings)
 
 bin:
-  mesh: null                # STEP/STL/OBJ of your real bin; null = procedural box from size_m
+  mesh: null                  # STEP/STL/OBJ of your real bin; null = procedural box from size_m
   size_m: [0.60, 0.40, 0.25]  # outer size (procedural bin)
   wall_thickness_m: 0.01
-  inner_size_m: null        # required with `mesh`: usable inner volume [x, y, z]
-  floor_z_m: null           # with `mesh`: inner floor height in the bin frame (default: wall_thickness_m)
-  units: m                  # units of `mesh` (mm | m)
-  pos_m: [0.0, 0.0, 0.0]    # bin frame origin (bottom center) in the env frame
+  inner_size_m: null          # required with `mesh`: usable inner volume [x, y, z]
+  floor_z_m: null             # with `mesh`: inner floor height in the bin frame (default: wall_thickness_m)
+  units: m                    # units of `mesh` (mm | m)
+  pos_m: [0.0, 0.0, 0.0]      # bin frame origin (bottom center) in the env frame
   rpy_deg: [0, 0, 0]
   friction: 0.5
-  collision: convexHull     # procedural: per-wall boxes; mesh bins: none (triangle mesh, kinematic OK) | convexDecomposition | sdf
+  collision: convexHull       # procedural: per-wall boxes; mesh bins: none (triangle mesh, kinematic OK) | convexDecomposition | sdf
   color: [0.12, 0.25, 0.55]
 
-parts:                      # one or more part types; each scene samples a count per type
+parts:                        # one or more part types; each scene samples a count per type
   - config: parts/side_plate.yaml
-    count: [8, 25]
+    count: [280, 300]
 
 loading:
-  mode: mixed               # random (drop into a cluster) | layers (ordered stacks) | mixed (per scene)
+  mode: random                # random (drop into a cluster) | layers (ordered stacks) | mixed (per scene)
   mixed_layers_prob: 0.3
-  wall_margin_m: 0.01
+  wall_margin_m: 0.03         # parts are dropped at least this far from the walls (+ their radius)
+  partial_fill:               # bins the robot has partly emptied: with this probability a pile gets only a random
+    prob: 0.0                 # fraction (min_fraction..1) of parts.count (0 = always parts.count)
+    min_fraction: 0.05        # 280-300 parts -> as few as ~15
   random:
-    drop_height_m: [0.02, 0.15]   # extra clearance above the pile/floor when spawning
+    drop_height_m: [0.01, 0.06]   # extra clearance above the pile/floor when spawning (high drops bounce onto the rim)
     orientation: uniform          # uniform | layer (layer orientation + yaw) | flat (layer orientation + random flip + yaw)
   layers:
     num_layers: [1, 3]
@@ -69,13 +81,27 @@ loading:
       amp_m: 0.0
       freq_hz: 3.0
       duration_s: 0.6
+  vibrate:                  # while capturing a pile's views: shake the bin so the parts shift a little
+    every_views: 10         # before every N-th view (0 = off: all views of a pile show the same pile)
+    amp_m: 0.005            # bin xy amplitude (value, or [lo, hi] = a different strength every shake)
+    freq_hz: 8.0
+    duration_s: 0.3         # shaking time (fades in and out), then ...
+    settle_s: 0.3           # ... rest time before the next capture (poses are re-read after it)
+    spread:                 # while the shaking dies down push the heap outward, so a pile bunched up
+                            # in the middle lies flat into the corners again - one motion with the shaking
+      speed_mps: 0.5        # outward speed of the highest parts (less the lower they are; bottom ~30 % not pushed); 0 = off
+      lift: 0.25            # upward speed as a fraction of the outward speed (unsticks them)
+      wall_fade_m: 0.05     # parts closer than this to a wall are pushed less (no climbing onto the rim)
+      pulses: 2             # pushes between 50 and 80 % of the shaking, each aimed from the pile's current shape
   settle:
     min_steps: 60
-    max_steps: 1200
+    max_steps: 600          # max settle time 3 s (was 1200 = 6 s; ~300 parts never met the thresholds anyway)
     lin_vel_thresh: 0.005   # m/s — every part in every env below this ...
     ang_vel_thresh: 0.05    # rad/s
     hold_steps: 10          # ... for this many consecutive steps
-    escape_margin_m: 0.02   # parts outside the bin by more than this are removed before capture
+    escape_margin_m: 0.0    # parts whose centre is outside the inner walls by more than this are removed ...
+    rim_clearance_m: 0.02   # ... and so are parts whose centre is higher than rim - this (caught on the rim);
+                            # removed = hidden and parked outside the view, also after every shake
 
 randomization:
   lights:
@@ -83,22 +109,36 @@ randomization:
     key_intensity: [2000, 12000]   # sphere light placed randomly above the bin
     key_height_m: [1.2, 2.0]
     key_offset_m: 0.8
-  part_materials: true             # per-instance color/roughness/metallic jitter around part `color`
-  color_jitter: 0.08
-  bin_materials: true
+    projector_intensity: [500000, 2000000]  # light at the PhoXi projector (camera.noise.projector.baseline_m),
+    projector_radius_m: 0.03                # moves with the camera; the scanner lights the scene itself
+    state_jitter: 0.1              # after every shake (new pile state): each intensity varies by +-10 % ...
+    state_key_move_m: 0.1          # ... and the key light moves by up to +-10 cm around this scene's values
+  part_materials: true             # per-part colour / roughness / metallic around the part config, new every scene
+                                   # (false = every part exactly as configured in its part yaml)
+  part_color: fixed                # fixed = part yaml colour | gray = same hue, lighter/darker only | color = hue varies too
+  color_jitter: 0.12
+  roughness_jitter: 0.15           # +- around the part's roughness (value or [lo, hi] in the part yaml)
+  metallic_jitter: 0.15
+  bin_materials: false             # false = the bin keeps bin.color (blue) every scene
 
 grasps:
-  enabled: true
-  min_visib: 0.6            # a part must be at least this visible to be "pickable"
+  enabled: false              # true = also write grasps/*.json (suction candidates); costs ~15 s per scene with ~300 parts
+  min_visib: 0.6              # a part must be at least this visible to be "pickable"
   max_approach_angle_deg: 45  # from straight down (world -Z)
   approach_clearance_m: 0.05  # swept length checked above the grasp along the approach axis
-  point_samples: 1500       # surface points per part for collision checks
+  point_samples: 1500         # surface points per part for collision checks
   max_grasps_per_part: 64
 
 outputs:
   bop: true
   coco: true
-  pointcloud_ply: false     # per-view colored point cloud from (noisy) depth
-  viz: true
-  depth_scale: 0.1          # BOP depth_scale: depth_png * depth_scale = mm  (0.1 -> 0.1 mm steps, max 6.5 m)
-  verify_first_scene: true  # reprojection IoU check on the first scene (catches pose-convention bugs early)
+  pointcloud_ply: false       # per-view colored point cloud from (noisy) depth
+  viz: true                   # annotated panel JPGs (how often: run.save_viz_every)
+  depth_scale: 0.1            # BOP depth_scale: depth_png * depth_scale = mm  (0.1 -> 0.1 mm steps, max 6.5 m)
+  full_masks: false           # true = also write mask/ (amodal silhouette incl. hidden parts) + exact visib_fract;
+                              # that is ~70% of the save time. false: pose + visible masks unchanged, visib_fract = null
+  mask_format: instance       # visible masks: instance = one uint16 PNG per image, mask_visib_inst/<im>.png
+                              # (pixel = gt index + 1, 0 = background) | per_part = BOP mask_visib/<im>_<gt>.png
+                              # (one file per part: ~300 files per image). COCO json has the same masks (RLE) either way
+  verify_first_scene: true    # reprojection IoU check on the first scene (catches pose-convention bugs early)
+  skip_invisible: true

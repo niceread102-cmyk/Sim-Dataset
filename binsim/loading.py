@@ -44,11 +44,17 @@ class Placement:
     quat: np.ndarray             # (4,) wxyz, bin frame
 
 
-def sample_counts(parts_cfg, rng: np.random.Generator) -> list[int]:
+def sample_counts(parts_cfg, rng: np.random.Generator, loading_cfg=None) -> list[int]:
+    """Parts per type for one scene. loading.partial_fill: with probability `prob` the whole pile is scaled down to a
+    random fraction in [min_fraction, 1] (a bin the robot has partly emptied)."""
     out = []
     for p in parts_cfg:
         lo, hi = count_range(p)
         out.append(int(rng.integers(lo, hi + 1)))
+    pf = (loading_cfg or {}).get("partial_fill", {}) or {}
+    if float(pf.get("prob", 0.0)) > 0 and rng.random() < float(pf["prob"]):
+        f = rng.uniform(float(pf.get("min_fraction", 0.05)), 1.0)
+        out = [max(1, int(round(c * f))) for c in out]
     return out
 
 
@@ -114,8 +120,12 @@ def _plan_random(order, geoms, bin_geom, loading_cfg, rng, existing=()):
         xy = np.array([rng.uniform(-hx, hx), rng.uniform(-hy, hy)])
         z = bin_geom.floor_z + h + rng.uniform(h_lo, h_hi)
         for pxy, pz, pr, ph in placed:
-            if np.linalg.norm(xy - pxy) < r_xy + pr:
-                z = max(z, pz + ph + h + 0.002)
+            d = float(np.linalg.norm(xy - pxy))
+            if d < r_xy + pr:
+                if orient == "uniform":  # bounding spheres: rest on the other sphere (they just touch), much lower
+                    z = max(z, pz + float(np.sqrt((r_xy + pr) ** 2 - d ** 2)) + 0.002)  # columns than stacking
+                else:
+                    z = max(z, pz + ph + h + 0.002)
         placed.append((xy, z, r_xy, h))
         out.append(Placement(int(ti), np.array([xy[0], xy[1], z]), np.asarray(q, float)))
     return out
@@ -189,12 +199,15 @@ def bin_geom_from_cfg(bin_cfg) -> BinGeom:
     return BinGeom(inner, floor)
 
 
-def in_bin(pos_bin: np.ndarray, bin_geom: BinGeom, margin: float) -> np.ndarray:
-    """(N,3) bin-frame positions -> bool mask of parts inside the inner volume (+margin)."""
+def in_bin(pos_bin: np.ndarray, bin_geom: BinGeom, margin: float, rim_clearance: float | None = None) -> np.ndarray:
+    """(N,3) bin-frame part centres -> bool mask of parts inside the inner volume (+margin).
+    rim_clearance: parts whose centre is higher than (rim top - rim_clearance) do not count as inside (caught on the
+    rim / lying on a wall); None = anything up to 0.5 m above the rim counts."""
     ix, iy, iz = bin_geom.inner_size
     p = np.atleast_2d(pos_bin)
+    top = bin_geom.floor_z + iz + (0.5 if rim_clearance is None else -float(rim_clearance))
     return ((np.abs(p[:, 0]) <= ix / 2 + margin) & (np.abs(p[:, 1]) <= iy / 2 + margin)
-            & (p[:, 2] >= bin_geom.floor_z - margin) & (p[:, 2] <= bin_geom.floor_z + iz + 0.5))
+            & (p[:, 2] >= bin_geom.floor_z - margin) & (p[:, 2] <= top))
 
 
 def shake_schedule(loading_cfg, rng) -> list[int]:
