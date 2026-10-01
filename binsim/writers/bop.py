@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image
 
 from ..poses import symmetry_transforms
+from ..viz import depth_preview, depth_preview_phoxi
 
 
 def save_png(path: str, arr: np.ndarray, compress: int = 3):
@@ -66,15 +67,25 @@ def write_camera_json(root: str, intr, depth_scale: float):
 
 
 class SceneWriter:
-    def __init__(self, root: str, scene_id: int, depth_scale: float, save_clean_depth: bool = False):
+    def __init__(self, root: str, scene_id: int, depth_scale: float, save_clean_depth: bool = False,
+                 folders: dict | None = None, depth_range_m=(0.458, 1.118), depth_vis_style: str = "phoxi"):
+        """folders: per-image folders to write ({"rgb": bool, "depth": bool, ...}, missing = True); a folder is only
+        created when something is written into it. depth_vis_style: phoxi = 16-bit per-image min-max like the PhoXi
+        sample viewer (viz.depth_preview_phoxi) | fixed = 8-bit, one mapping over depth_range_m (viz.depth_preview)."""
         self.dir = os.path.join(root, "train_pbr", f"{scene_id:06d}")
         self.depth_scale = depth_scale
         self.save_clean_depth = save_clean_depth
-        subdirs = ["rgb", "depth", "grasps", "poses"] + (["depth_clean"] if save_clean_depth else [])
-        for s in subdirs:
-            os.makedirs(os.path.join(self.dir, s), exist_ok=True)
-        self._made = set(subdirs)
+        self.folders = dict(folders or {})
+        self.depth_range_m = tuple(float(x) for x in depth_range_m)
+        if depth_vis_style not in ("phoxi", "fixed"):
+            raise ValueError(f"outputs.depth_vis_style must be phoxi or fixed, got {depth_vis_style!r}")
+        self.depth_vis_style = depth_vis_style
+        os.makedirs(self.dir, exist_ok=True)
+        self._made = set()
         self.scene_camera, self.scene_gt, self.scene_gt_info = {}, {}, {}
+
+    def enabled(self, folder: str) -> bool:
+        return bool(self.folders.get(folder, True))
 
     def _sub(self, name: str) -> str:
         d = os.path.join(self.dir, name)
@@ -91,11 +102,18 @@ class SceneWriter:
         """masks_full / masks_visib: per-gt (H, W) bool masks (None or None entries = not written);
         inst_visib: (H, W) gt index per pixel (-1 = no part), written as one uint16 PNG (gt index + 1)."""
         tag = f"{im_id:06d}"
-        save_png(os.path.join(self.dir, "rgb", f"{tag}.png"), rgb)
-        save_png(os.path.join(self.dir, "depth", f"{tag}.png"), self._depth_u16(depth_m))
+        if self.enabled("rgb"):
+            save_png(os.path.join(self._sub("rgb"), f"{tag}.png"), rgb)
+        d16 = self._depth_u16(depth_m)
+        if self.enabled("depth"):
+            save_png(os.path.join(self._sub("depth"), f"{tag}.png"), d16)
+        if self.folders.get("depth_vis", False):  # preview of exactly the stored values (off unless asked for)
+            d_m = d16 * self.depth_scale / 1000.0
+            vis = depth_preview_phoxi(d_m) if self.depth_vis_style == "phoxi" else depth_preview(d_m, *self.depth_range_m)
+            save_png(os.path.join(self._sub("depth_vis"), f"{tag}.png"), vis)
         if self.save_clean_depth and depth_clean_m is not None:
-            save_png(os.path.join(self.dir, "depth_clean", f"{tag}.png"), self._depth_u16(depth_clean_m))
-        if inst_visib is not None:
+            save_png(os.path.join(self._sub("depth_clean"), f"{tag}.png"), self._depth_u16(depth_clean_m))
+        if inst_visib is not None and self.enabled("mask_visib_inst"):
             save_png(os.path.join(self._sub("mask_visib_inst"), f"{tag}.png"), (np.asarray(inst_visib) + 1).astype(np.uint16))
         for sub, masks in (("mask", masks_full), ("mask_visib", masks_visib)):
             for k, m in enumerate(masks or []):

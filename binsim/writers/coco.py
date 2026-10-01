@@ -65,10 +65,13 @@ class CocoScene:
         self.add_instance_rle(im_id, obj_id, rle_encode(mask_visib), area, bbox_visib, visib_fract, ignore_below)
 
     def add_instance_rle(self, im_id: int, obj_id: int, rle: dict, area: int, bbox_visib, visib_fract: float,
-                         ignore_below: float = 0.1):
-        self.data["annotations"].append({
-            "id": self._ann, "image_id": im_id, "category_id": obj_id, "iscrowd": 0, "area": area,
-            "bbox": bbox_visib, "segmentation": rle, "visib_fract": visib_fract,
-            "ignore": bool(visib_fract is not None and visib_fract < ignore_below),
-        })
+                         ignore_below: float = 0.1, gt_idx: int | None = None):
+        """gt_idx: index of this part in scene_gt.json / scene_gt_info.json of the same image (= instance map value - 1),
+        so a COCO mask can be matched to its 6D pose (COCO leaves out parts that are not visible)."""
+        ann = {"id": self._ann, "image_id": im_id, "category_id": obj_id, "iscrowd": 0, "area": area,
+               "bbox": bbox_visib, "segmentation": rle, "visib_fract": visib_fract,
+               "ignore": bool(visib_fract is not None and visib_fract < ignore_below)}
+        if gt_idx is not None:
+            ann["gt_idx"] = int(gt_idx)
+        self.data["annotations"].append(ann)
         self._ann += 1

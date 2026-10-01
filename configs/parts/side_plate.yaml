@@ -1,10 +1,10 @@
 # Side plate (cast, before machining). Reference: /home/v/IsaacSim/assets/myeonghwa/SIDE_PLATE.usd
 # (same mm->m scale, mass, convex decomposition with 32 hulls).
 name: side_plate
-mesh: /home/v/stl/SIDE-PLATE.stl   # 54 x 54 x 9.6 mm, watertight
+mesh: ../../assets/SIDE-PLATE.stl   # 54 x 54 x 9.6 mm, watertight
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
-mass_kg: 0.1              # SIDE_PLATE.usd physics:mass; 13.3 cm^3 x steel 7.85 g/cm^3 = 0.104 kg
+mass_kg: 0.047            # SIDE_PLATE.usd physics:mass; 13.3 cm^3 x steel 7.85 g/cm^3 = 0.104 kg
 friction: 0.5             # SIDE_PLATE.usd has no physics material -> PhysX defaults (friction 0.5, restitution 0)
 restitution: 0.0
 collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)

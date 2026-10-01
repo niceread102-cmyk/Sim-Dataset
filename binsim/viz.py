@@ -26,6 +26,26 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
+def depth_preview(depth_m: np.ndarray, near_m: float, far_m: float) -> np.ndarray:
+    """8-bit view of a depth map with ONE fixed mapping for every image (no per-image stretch): near_m -> 255 (white),
+    far_m -> 1, no depth (0) -> 0 (black). depth_mm = far_mm - (v - 1) / 254 * (far_mm - near_mm) for v >= 1."""
+    d = np.asarray(depth_m, np.float64)
+    v = 1 + np.round(254 * np.clip((far_m - d) / max(far_m - near_m, 1e-9), 0, 1))
+    return np.where(d > 0, v, 0).astype(np.uint8)
+
+
+def depth_preview_phoxi(depth_m: np.ndarray) -> np.ndarray:
+    """16-bit view made like the PhoXi GigE-V sample viewer (photoneo harvesters advanced/show_confidence_map.py ->
+    visualizer.process_for_visualisation: cv2.normalize(depth, 0, 65535, NORM_MINMAX).astype(uint16)): each image
+    stretched from its own min to max, so no depth (0, the min) = black, near = dark, far = bright. Compare with the
+    real Output/depth PNGs; the fixed-scale depth_preview is the one to compare images with each other."""
+    d = np.asarray(depth_m, np.float32)
+    lo, hi = float(d.min()), float(d.max())
+    if hi <= lo:
+        return np.zeros(d.shape, np.uint16)
+    return ((d - lo) * np.float32(65535.0 / (hi - lo))).astype(np.uint16)
+
+
 def colorize_depth(depth_m: np.ndarray, rng_m=None) -> np.ndarray:
     """Turbo-like colormap; invalid (0) pixels black."""
     valid = depth_m > 0

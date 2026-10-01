@@ -1,6 +1,13 @@
 """Generate until a target number of images exists, surviving Isaac Sim hangs and crashes.
 
-    lab scripts/run_supervised.py --config configs/default.yaml --images 50000 [--stall-min 5] [key=value ...]
+    lab scripts/run_supervised.py --config configs/default.yaml [--images 25000] [--stall-min 5] [key=value ...]
+
+--images: images per part (default run.num_scenes x run.views_per_scene). run.num_parts: N (default 1) runs N such
+parts back to back, each in its own folder <output_dir>/part_01 .. part_N with scene ids continuing (part 2 of
+250-scene parts = scenes 000250-000499, other piles: the id offset is part of the seed). Finished parts are skipped,
+so running the same command again resumes where it stopped.
+--scenes-per-process N (default 30, 0 = off): every Isaac Sim process stops after N scenes and a fresh one continues
+(next shard_XX folder, scene ids continuing).
 
 Runs scripts/generate_isaacsim.py one shard at a time. When a shard stops making progress (no new
 "[INFO] scene" line for --stall-min minutes) its thread stacks are saved to <output_dir>/logs/hang_shard_XX_*.txt
@@ -9,6 +16,7 @@ the next shard continues (new run.shard_id -> new piles; nothing is overwritten)
 count toward the target, so running the same command again resumes. Logs: <output_dir>/logs/shard_XX.log.
 """
 import argparse
+import json
 import math
 import os
 import shutil
@@ -46,9 +54,21 @@ def complete(scene_dir):
     return os.path.exists(os.path.join(scene_dir, "scene_info.json"))  # written last by process_scene
 
 
+def scene_images(scene_dir):
+    """Images of a finished scene: scene_info.json num_views (works with outputs.folders.rgb off), else rgb/ files."""
+    try:
+        with open(os.path.join(scene_dir, "scene_info.json")) as f:
+            n = json.load(f).get("num_views")
+        if n is not None:
+            return int(n)
+    except (OSError, ValueError):
+        pass
+    rgb = os.path.join(scene_dir, "rgb")
+    return len(os.listdir(rgb)) if os.path.isdir(rgb) else 0
+
+
 def count_images(out):
-    return sum(len(os.listdir(os.path.join(s, "rgb"))) for d in shard_dirs(out).values() for s in scene_dirs(d)
-               if complete(s))
+    return sum(scene_images(s) for d in shard_dirs(out).values() for s in scene_dirs(d) if complete(s))
 
 
 def drop_unfinished(shard_dir):
@@ -148,43 +168,79 @@ def main():
     signal.signal(signal.SIGTERM, _on_signal)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=os.path.join(REPO, "configs", "default.yaml"))
-    ap.add_argument("--images", type=int, required=True, help="stop once this many images exist (all shards)")
+    ap.add_argument("--images", type=int, default=None,
+                    help="images per part (all its shards); default run.num_scenes x run.views_per_scene")
     ap.add_argument("--stall-min", type=float, default=5.0, help="restart when no scene finished for this long")
     ap.add_argument("--startup-min", type=float, default=10.0, help="allowance for launch + first scene")
     ap.add_argument("--max-failures", type=int, default=3, help="give up after this many shards in a row with no scene")
+    ap.add_argument("--scenes-per-process", type=int, default=30,
+                    help="each Isaac Sim process makes at most this many scenes, then a fresh one continues in the next "
+                         "shard_XX (0 = no limit: one process per part, a new one only after a hang)")
     ap.add_argument("--dry-run", action="store_true", help="only print what would happen (touches nothing)")
     ap.add_argument("overrides", nargs="*", help="dotted config overrides passed to every shard")
     args = ap.parse_args()
     args.config = os.path.abspath(args.config)
     cfg = load_config(args.config, args.overrides)
-    out = os.path.expanduser(cfg.run.output_dir)
+    root = os.path.expanduser(cfg.run.output_dir)
     V = int(cfg.run.views_per_scene)
+    target = int(args.images) if args.images else int(cfg.run.num_scenes) * V  # per part
+    n_parts = max(int(cfg.run.get("num_parts", 1) or 1), 1)
+    offset0 = int(cfg.run.get("scene_offset", 0))
+    per_part = math.ceil(target / V)  # scenes per part -> scene id offset of the next part
+    parts = [(root, list(args.overrides))] if n_parts == 1 else [
+        (os.path.join(root, f"part_{p + 1:02d}"),
+         [*args.overrides, f"run.output_dir={os.path.join(root, f'part_{p + 1:02d}')}", f"run.scene_offset={offset0 + p * per_part}"])
+        for p in range(n_parts)]
 
-    if args.dry_run:
-        for sid_, d in sorted(shard_dirs(out).items()):
-            sc = scene_dirs(d)
-            n_ok = sum(complete(s) for s in sc)
-            imgs = sum(len(os.listdir(os.path.join(s, "rgb"))) for s in sc if complete(s))
-            say(f"shard_{sid_:02d}: {n_ok} finished scenes ({imgs} images) - kept; {len(sc) - n_ok} unfinished - would be deleted")
-        have = count_images(out)
-        nxt = max(shard_dirs(out), default=-1) + 1
-        say(f"{have} / {args.images} images -> next: new folder shard_{nxt:02d} with "
-            f"{max(math.ceil((args.images - have) / V), 0)} scenes (existing shards are never written)")
-        return
+    for p, (out, overrides) in enumerate(parts):
+        if n_parts > 1:
+            say(f"part {p + 1}/{n_parts}: {out} - {target} images, scene ids from {offset0 + p * per_part:06d}")
+        if args.dry_run:
+            for sid_, d in sorted(shard_dirs(out).items()):
+                sc = scene_dirs(d)
+                n_ok = sum(complete(s) for s in sc)
+                imgs = sum(scene_images(s) for s in sc if complete(s))
+                say(f"shard_{sid_:02d}: {n_ok} finished scenes ({imgs} images) - kept; {len(sc) - n_ok} unfinished - would be deleted")
+            have = count_images(out)
+            nxt = max(shard_dirs(out), default=-1) + 1
+            say(f"{have} / {target} images -> " + (f"next: new folder shard_{nxt:02d} with {math.ceil((target - have) / V)} "
+                                                   f"scenes (existing shards are never written)" if have < target else "done, skipped"))
+            continue
+        supervise(args, out, target, overrides, V, root, offset0 + p * per_part)
+    if n_parts > 1 and not args.dry_run:
+        say(f"all {n_parts} parts done")
 
+
+def complete_ids(folder):
+    """Ids of the complete scenes in every shard under folder (and its part_XX folders)."""
+    shards = [*shard_dirs(folder).values()]
+    for p in (os.path.join(folder, d) for d in os.listdir(folder) if d.startswith("part_")) if os.path.isdir(folder) else []:
+        shards += shard_dirs(p).values()
+    return {int(os.path.basename(s)) for d in shards for s in scene_dirs(d) if complete(s)}
+
+
+def supervise(args, out, target, overrides, V, root, part_offset):
+    """Start shards in `out` until `target` images exist there (resumes; a hung shard is replaced by a new one).
+    Every process makes at most --scenes-per-process scenes; scene ids continue from the part's last one."""
     failures = 0
     while True:
         for d in shard_dirs(out).values():
             drop_unfinished(d)
         have = count_images(out)
-        say(f"{have} / {args.images} images in {out}")
-        if have >= args.images:
+        say(f"{have} / {target} images in {out}")
+        if have >= target:
             say("target reached")
             return
         sid = max(shard_dirs(out), default=-1) + 1
-        need = math.ceil((args.images - have) / V)
+        need = math.ceil((target - have) / V)
+        if args.scenes_per_process > 0:
+            need = min(need, args.scenes_per_process)
+        taken = complete_ids(root)  # all parts: an id is never used twice
+        base = part_offset  # first free block of `need` ids from the part's start: ids continue 000000, 000001, ...
+        while clash := [i for i in range(base, base + need) if i in taken]:
+            base = max(clash) + 1
         before = have
-        result = run_shard(args, args.overrides, out, sid, need)
+        result = run_shard(args, [*overrides, f"run.scene_id_base={base}"], out, sid, need)
         d = shard_dirs(out).get(sid)
         if d:
             drop_unfinished(d)

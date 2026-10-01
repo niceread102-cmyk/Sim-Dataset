@@ -27,17 +27,49 @@ camera:
     look_at_m: 0.02
     roll_deg: 4.0
   render_subframes: 2           # extra RTX frames after moving the camera (removes ghosting)
-  noise:
-    enabled: true
-    sigma_mm_at_1m: 0.35        # axial noise, scales with depth^2 (structured-light triangulation)
+  noise:                        # numbers may be [lo, hi] ranges: drawn per image
+    enabled: true               # tuned against real PAJ-042 scans of the side-plate bin (2026-09-29): sharp outlines,
+                                # clean faces, holes = projector shadows + gaps between parts + steep flanks
+    sigma_mm_at_1m: [0.4, 0.8]  # axial noise, scales with depth^2 (structured-light triangulation)
     quantize_mm: 0.05
-    edge_grad_mm: 6.0           # depth jump (per pixel) treated as an edge ...
-    edge_dropout_prob: 0.7      # ... and invalidated with this probability (flying-pixel removal)
-    edge_dilate_px: 1
-    max_incidence_deg: 78       # steeper surfaces return no depth
-    random_dropout: 0.002
+    edge_blur_px: 0.0           # depth low-pass (gaussian sigma, px at 1032x772): smeared, rounded outlines (0 = off;
+                                # the real scans have pixel-sharp outlines)
+    edge_shift_px: 0            # outlines grow (+) / shrink (-) by up to this many px, drawn per image (0 = off)
+    edge_ragged: {}             # irregular outlines: {band_px, blob_px, amount} ({} = off; not seen in real scans)
+    edge_grad_mm: 6.0           # depth jump (per pixel) treated as an edge (part outline) ...
+    edge_strength: 0.6          # ... how dark the outlines come out, 0..1 (or [lo, hi] per image): 0 = no gap at the
+                                # outlines (faint), 1 = every outline pixel without depth + a gap edge_width_px wide
+                                # on the far side (thick black rings). 0.6 = PAJ-042 mm scans. null = the two lines below
+    edge_width_px: 3            # outline gap width at edge_strength 1 (strength 0.5 -> ~2 px)
+    edge_dropout_run_px: 5.0    # outline pixels drop out in pieces of about this length (0 = pixel by pixel = dotted)
+    edge_dropout_prob: [0.6, 0.95]  # only with edge_strength: null - share of outline pixels without depth
+    edge_dilate_px: 0               # only with edge_strength: null - outline widened by this many px
+    max_incidence_deg: [72, 80] # steeper surfaces return no depth (bin, floor)
+    max_incidence_parts_deg: [58, 68]  # same for the metal parts (their steep flanks are empty in the real scans)
+    random_dropout: 0.0         # salt-and-pepper holes everywhere (real scans: none)
+    outliers:                   # isolated wrong depth values (decoding errors): this fraction of valid pixels ...
+      fraction: [0.0, 0.0003]
+      mm: [3, 20]               # ... is moved by a random amount of this size (gaussian sigma, mm)
+      far:                      # small patches inside holes decoded far behind the scene (PAJ-042 scans: 2-4 per
+        count: [1, 4]           # image, 1-100 px at full res, ~300-650 mm too far = 0.98-1.24 m). They are the max
+        radius_px: [0.5, 3.0]   # of a min-max normalised view (sample viewer Output/depth: that is why the parts
+        mm: [300, 650]          # there are mid gray, not white). {} = off
+    specular:                  # metal parts only: where the surface mirrors the projector into the camera the
+      angle_deg: [1.5, 3.5]     # sensor saturates -> no depth (normal within this angle of the mirror direction)
+      prob: [0.3, 0.8]          # each highlight patch is lost whole with this probability ...
+      dilate_px: 1
+      min_px: 12                # ... if it has at least this many pixels
+      smooth_px: 2.0            # normals averaged over this radius first (per mesh facet = mottled black faces)
+    holes:                      # metal parts only: patchy missing regions (dark / glossy spots, failed decoding)
+      count: [0, 6]             # discs per image ...
+      radius_px: [3, 8]         # ... of this radius (at the rendered 1032x772)
+    cavity:                     # narrow deep gaps between parts get no depth ({} = off):
+      window_px: [15, 31]       # gaps narrower than this ...
+      depth_mm: [8, 15]         # ... and deeper than this below the surfaces around them
     projector:                  # projector shadow: points the projector can't see get no depth
       enabled: true
-      baseline_m: [0.24, 0.0, 0.0]  # projector position in the camera (OpenCV) frame — approx.
-      tolerance_mm: 2.0
-      downsample: 2
+      baseline_m: [-0.24, 0.0, 0.0] # projector position in the camera (OpenCV) frame, distance approx. PAJ-042 scans:
+                                    # shadows lie right of the parts -> projector left of the camera (-x)
+      tolerance_mm: 3.0
+      downsample: 1             # projector z-buffer resolution (2 = half: coarser, striped shadows on walls)
+      slope_px: 2.0             # tolerance + this many projector pixels' worth of the surface slope (no stripes on walls)

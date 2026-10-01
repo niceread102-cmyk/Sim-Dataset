@@ -27,7 +27,7 @@ def test_config_validation():
     with pytest.raises(ValueError, match="loading.mode"):
         load_config(CONFIG, ["loading.mode=chaos"])
     with pytest.raises(ValueError, match="inner_size_m"):
-        load_config(CONFIG, ["bin.mesh=/tmp/bin.stl"])
+        load_config(CONFIG, ["bin.mesh=/tmp/bin.stl", "bin.inner_size_m=null"])
 
 
 # ---------------------------------------------------------------- transforms
@@ -93,8 +93,11 @@ def test_in_bin():
 # ---------------------------------------------------------------- camera / poses
 def test_intrinsics_scaling(cfg):
     intr = intrinsics_from_cfg(cfg.camera)
-    assert (intr.width, intr.height) == (1032, 772)
-    assert np.isclose(intr.fx, 1250.0)
+    s = float(cfg.camera.render_scale)
+    (W, H), k = cfg.camera.resolution, cfg.camera.intrinsics
+    assert (intr.width, intr.height) == (round(W * s), round(H * s))
+    assert np.isclose(intr.fx, k["fx"] * s) and np.isclose(intr.fy, k["fy"] * s)
+    assert np.isclose(intr.cx, (k["cx"] + 0.5) * s - 0.5)  # pixel centres kept
 
 
 def test_model_to_cam_identity():
@@ -128,7 +131,8 @@ def test_depth_range_and_dropout(cfg):
     assert np.all(out[:, :40] == 0)
     valid = out[:, 60:] > 0
     assert valid.mean() > 0.95
-    assert np.abs(out[:, 60:][valid] - 0.8).max() < 0.003
+    # camera.noise.outliers moves a small fraction (<= 0.3 %) of pixels on purpose: check the bulk, not the max
+    assert np.quantile(np.abs(out[:, 60:][valid] - 0.8), 0.99) < 0.003
 
 
 def test_projector_shadow_next_to_step():

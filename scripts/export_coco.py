@@ -108,6 +108,8 @@ def export(out, scenes, path, small_area, small, cat_holder):
                 rec = {"id": n_ann, "image_id": idmap[a["image_id"]], "category_id": a["category_id"], "iscrowd": crowd,
                        "ignore": crowd, "area": a["area"], "bbox": a["bbox"],
                        "segmentation": {"size": a["segmentation"]["size"], "counts": s}}
+                if "gt_idx" in a:  # index into scene_gt.json of this image (the part's 6D pose)
+                    rec["gt_idx"] = a["gt_idx"]
                 f.write(("" if first else ",") + json.dumps(rec, separators=(",", ":")))
                 first = False
                 n_ann += 1

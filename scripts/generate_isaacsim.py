@@ -39,6 +39,9 @@ args.experience = os.path.expanduser(cfg.sim.get("experience")
 args.headless = bool(args.headless or cfg.sim.get("headless", False))
 if not args.headless:
     args.visualizer = ["kit"]
+_kit_args = " ".join(a for a in (getattr(args, "kit_args", "") or "", str(cfg.sim.get("kit_args") or "")) if a.strip())
+if _kit_args:
+    args.kit_args = _kit_args  # e.g. the RTX descriptor pool sizes (sim.kit_args)
 simulation_app = AppLauncher(args).app
 
 # hang diagnosis: `kill -USR1 <pid>` prints every Python thread's stack; and let a watchdog attach py-spy / gdb
@@ -58,7 +61,7 @@ from pxr import Gf, Sdf, Semantics, UsdGeom, UsdLux, UsdPhysics, UsdShade  # noq
 
 from binsim import grasps as G  # noqa: E402
 from binsim.assets import git_hash, prepare_all, set_omnipbr  # noqa: E402
-from binsim.camera import intrinsics_from_cfg, rim_height, sample_view  # noqa: E402
+from binsim.camera import centred, intrinsics_from_cfg, mount_eye_target, rim_height, sample_view  # noqa: E402
 from binsim.config import as_range, dump_config, to_plain  # noqa: E402
 from binsim.loading import (bin_geom_from_cfg, in_bin, part_geoms_from_cfg, plan_scene, sample_counts,  # noqa: E402
                             shake_schedule)
@@ -276,12 +279,18 @@ def settle(rigid, n, rng):
     return u + 1
 
 
+_PARKED = {"n": 0, "idx": set()}  # parts parked in the current scene (each gets its own spot on the floor)
+
+
 def park(rigid, idx, T_w_bin):
-    """Move parts (escaped the bin / caught on its rim) far to the side of the bin, outside every view, at rest."""
-    idx = np.asarray(idx, int)
+    """Move parts (escaped the bin / caught on its rim / picked) far to the side of the bin, outside every view, at
+    rest, each on its own floor spot (spots are counted per scene so later calls never stack parts)."""
+    idx = np.asarray([i for i in np.asarray(idx, int) if int(i) not in _PARKED["idx"]], int)  # never move one twice
     if not len(idx):
         return
-    n = np.arange(len(idx))
+    _PARKED["idx"].update(int(i) for i in idx)
+    n = _PARKED["n"] + np.arange(len(idx))
+    _PARKED["n"] += len(idx)
     p_bin = np.stack([1.2 + 0.08 * (n % 8), -1.5 + 0.08 * (n // 8), np.full(len(idx), 0.01)], 1)  # on the floor
     rigid.set_world_poses(p_bin @ T_w_bin[:3, :3].T + T_w_bin[:3, 3], np.tile([1.0, 0.0, 0.0, 0.0], (len(idx), 1)),
                           indices=idx)
@@ -295,11 +304,77 @@ def remove_out_of_bin(stage, rigid, paths, keep, T_w_bin, T_bin_w, bin_geom):
     pos = rigid.get_world_poses()[0].numpy().astype(np.float64)
     inside = in_bin(pos @ T_bin_w[:3, :3].T + T_bin_w[:3, 3], bin_geom, float(st.get("escape_margin_m", 0.0)),
                     st.get("rim_clearance_m"))
-    out = np.flatnonzero(keep & ~inside)
+    parked = np.zeros(len(keep), bool)
+    parked[list(_PARKED["idx"])] = True
+    out = np.flatnonzero(keep & ~inside & ~parked)  # parts already parked (picked / removed earlier) stay where they are
     for k in out:
         UsdGeom.Imageable(stage.GetPrimAtPath(paths[k])).MakeInvisible()
     park(rigid, out, T_w_bin)
     return keep & inside
+
+
+def pick_plan(n_start, n_states, pk, rng):
+    """Parts to remove at each of the n_states pile-state changes of a scene (loading.pick): the bin goes from full
+    (n_start) down to end_left (drawn per scene), spread over the states with +-jitter per state. [] = no picking."""
+    if n_states <= 0 or not pk.get("end_left"):
+        return []
+    lo, hi = as_range(pk["end_left"])
+    n_end = int(min(rng.integers(int(lo), int(hi) + 1), n_start))
+    w = rng.uniform(1 - float(pk.get("jitter", 0.3)), 1 + float(pk.get("jitter", 0.3)), n_states)
+    q = np.floor(np.cumsum(w) / w.sum() * (n_start - n_end) + 1e-9).astype(int)
+    return np.diff(np.r_[0, q]).tolist()
+
+
+def pick_top(stage, rigid, paths, keep, T_bin_w, T_w_bin, bin_geom, k):
+    """Bin picking in progress: remove the k highest parts still in the bin. Picked parts are hidden and parked; they
+    stay in the scene's GT list (not visible). Returns how many were picked."""
+    if k <= 0:
+        return 0
+    pos = rigid.get_world_poses()[0].numpy().astype(np.float64) @ T_bin_w[:3, :3].T + T_bin_w[:3, 3]
+    cand = np.flatnonzero(keep & in_bin(pos, bin_geom, 0.0, None))
+    k = min(k, len(cand))
+    if k <= 0:
+        return 0
+    top = cand[np.argsort(-pos[cand, 2])[:k]]
+    for j in top:
+        UsdGeom.Imageable(stage.GetPrimAtPath(paths[j])).MakeInvisible()
+    park(rigid, top, T_w_bin)
+    return k
+
+
+def parts_in_bin(rigid, keep, T_bin_w, bin_geom):
+    """(N, 3) bin-frame centres (m) of the parts still in the bin (current pile state)."""
+    pos = rigid.get_world_poses()[0].numpy().astype(np.float64) @ T_bin_w[:3, :3].T + T_bin_w[:3, 3]
+    return pos[keep & in_bin(pos, bin_geom, 0.0, None)]
+
+
+def camera_offset(pile, eye_z0, bin_geom, rng, half_fov=(0.4128, 0.3088)):
+    """camera.random_height: a share camera.near_share of the views gets a camera height drawn between the mount height
+    and min_distance_m above the highest part, the other views are taken from the mount height (the fixed PhoXi's own
+    view) - so full and sparse bins are both seen from near and far. The lower the camera, the more it moves over a
+    randomly chosen part (camera.aim_at_parts; a close-up of the bin centre would miss sparse parts), but only so far
+    that at most camera.aim_max_outside of the image (per axis) looks past the inner walls. half_fov = (W/2/fx, H/2/fy).
+    Returns (height offset m, xy offset m) for sample_view."""
+    if not cfg.camera.get("random_height", False) or not len(pile):
+        return 0.0, np.zeros(2)
+    if rng.random() >= float(cfg.camera.get("near_share", 1.0)):
+        return 0.0, np.zeros(2)
+    z_lo = float(pile[:, 2].max()) + float(cfg.camera.get("min_distance_m", 0.5))
+    if z_lo >= eye_z0:
+        return 0.0, np.zeros(2)
+    z = rng.uniform(z_lo, eye_z0)
+    close = (eye_z0 - z) / (eye_z0 - z_lo)  # 0 = mount height, 1 = closest
+    xy = np.zeros(2)
+    if cfg.camera.get("aim_at_parts", True):
+        ix, iy = bin_geom.inner_size[:2]
+        # image footprint on the bin floor at this height; the view centre may move only so far that the part of the
+        # footprint beyond the inner walls stays below aim_max_outside of the image
+        d = z - bin_geom.floor_z
+        hw, hh = d * half_fov[0], d * half_fov[1]
+        keep = 1.0 - 2.0 * float(cfg.camera.get("aim_max_outside", 0.15))
+        lim = np.array([max(ix / 2 - keep * hw, 0.0), max(iy / 2 - keep * hh, 0.0)])
+        xy = np.clip(close * pile[rng.integers(len(pile)), :2], -lim, lim)
+    return z - eye_z0, xy
 
 
 def push_out(rigid, idx, T_w_bin, sp, rng, bin_geom):
@@ -310,6 +385,11 @@ def push_out(rigid, idx, T_w_bin, sp, rng, bin_geom):
     R = T_w_bin[:3, :3]
     speed = float(sp.get("speed_mps", 0.0))
     p = (rigid.get_world_poses()[0].numpy().astype(np.float64) - T_w_bin[:3, 3]) @ R  # bin frame
+    # only the parts still in the bin: picked / escaped parts are parked far outside it and would drag the pile
+    # centre (and so every push) towards the parking area
+    idx = idx[in_bin(p[idx], bin_geom, 0.0, None)]
+    if not len(idx):
+        return
     lin, ang = (a.numpy().astype(np.float64) for a in rigid.get_velocities())
     z = p[idx, 2]
     lo = np.percentile(z, 30)
@@ -356,14 +436,30 @@ def vibrate(bin_t_op, T_w_bin, vib, rng, rigid, active, bin_geom):
 def main():
     run = cfg.run
     shard = int(run.get("shard_id", 0))
+    offset = int(run.get("scene_offset", 0))  # scene ids start here (run_supervised run.num_parts: part k -> k * num_scenes)
+    # run_supervised.py sets scene_id_base: ids continue exactly where the previous process of the part stopped
+    # (otherwise id = shard * 100000 + offset + index, unique for launch_multi_gpu.py shards)
+    id_base = run.get("scene_id_base")
+    id_base = None if id_base is None else int(id_base)
     out = os.path.join(os.path.expanduser(run.output_dir), f"shard_{shard:02d}")
     os.makedirs(os.path.join(out, "viz"), exist_ok=True)
-    rng = np.random.default_rng([int(cfg.sim.get("seed", 0)), shard])
+    # the offset is part of the seed: another part (same shard ids) must not repeat the same piles
+    rng = np.random.default_rng([int(cfg.sim.get("seed", 0)), shard] + ([offset] if offset else [])
+                                + ([id_base] if id_base else []))
+    import carb.settings
+    _s = carb.settings.get_settings()
+    print(f"[INFO] rtx reservedDescriptors={_s.get('/rtx/reservedDescriptors')} "
+          f"descriptorSets={_s.get('/rtx/descriptorSets')}", flush=True)
 
     part_assets, bin_asset = prepare_all(cfg)
     geoms = part_geoms_from_cfg(cfg.parts, [a.extents for a in part_assets], [a.radius for a in part_assets])
     bin_geom = bin_geom_from_cfg(cfg.bin)
     intr = intrinsics_from_cfg(cfg.camera)
+    ren = centred(intr)  # K of the rendered images (the renderer ignores cx/cy) - written to scene_camera.json
+    if max(abs(ren.cx - intr.cx), abs(ren.cy - intr.cy)) > 0.01:
+        print(f"[WARN] camera.intrinsics cx/cy = ({intr.cx:.2f}, {intr.cy:.2f}) at the render size, but the renderer "
+              f"puts the principal point at the image centre: labels use cx={ren.cx}, cy={ren.cy}", flush=True)
+    intr = ren
     T_w_bin = make_T(rpy_to_mat(cfg.bin.get("rpy_deg", [0, 0, 0])), cfg.bin.get("pos_m", [0, 0, 0]))
     T_bin_w = inv_T(T_w_bin)
     grng = np.random.default_rng(0)
@@ -383,6 +479,18 @@ def main():
     update(5)
     stage = usd.get_stage()
     cam_prim, key_prim, proj_light = build_static_scene(stage, bin_asset, T_w_bin, intr)
+    # the Kit viewport renders its own view every frame, also headless (Kit log: 'Simulating 2 sensor(s)' - Replicator +
+    # ViewportTexture_0): twice the GPU work and RTX resources for nothing. sim.viewport_updates: auto = off headless
+    vp_mode = cfg.sim.get("viewport_updates", "auto")
+    if vp_mode is False or (vp_mode == "auto" and args.headless):
+        try:
+            from omni.kit.viewport.utility import get_active_viewport
+            vp = get_active_viewport()
+            if vp is not None:
+                vp.updates_enabled = False
+                print("[INFO] viewport rendering off: only the dataset camera is rendered", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[WARN] could not turn the viewport rendering off: {e}", flush=True)
     bin_t_op = UsdGeom.Xformable(stage.GetPrimAtPath("/World/bin")).GetOrderedXformOps()[0]  # translate (set_pose)
     update(5)
 
@@ -395,6 +503,8 @@ def main():
     subframes = max(int(cfg.camera.get("render_subframes", 2)), 1) + 1
     vib = cfg.loading.get("vibrate", {}) or {}
     vib_every = int(vib.get("every_views", 0) or 0)
+    pick_cfg = cfg.loading.get("pick", {}) or {}  # picked at the same moments as the shakes (every_views)
+    eye_z0 = float(mount_eye_target(cfg.camera, cfg.bin, bin_geom)[0][2])  # nominal camera height (bin frame)
     writer = AsyncWriter(int(run.get("writer_threads", 2)), max_pending=int(run.get("writer_threads", 2)))
 
     def save(sc, idx):
@@ -438,30 +548,42 @@ def main():
         steps = settle(rigid, len(paths), rng)
         t_settle = time.monotonic() - t_settle
 
+        _PARKED["n"] = 0
+        _PARKED["idx"] = set()
         active = remove_out_of_bin(stage, rigid, paths, np.ones(len(paths), bool), T_w_bin, T_bin_w, bin_geom)
         update(1)  # the parked parts' new poses reach the physics readback
         pos, quat = (a.numpy().astype(np.float64) for a in rigid.get_world_poses())
+        pile = parts_in_bin(rigid, active, T_bin_w, bin_geom)  # current pile state (camera.random_height)
+        n_in = int((active & in_bin(pos @ T_bin_w[:3, :3].T + T_bin_w[:3, 3], bin_geom, 0.0, None)).sum())
+        plan = pick_plan(n_in, len([u for u in range(1, V) if vib_every and u % vib_every == 0]), pick_cfg, rng)
         timeline.pause()
         update(2)
 
         t_cap = time.monotonic()
         views = []
+        n_picked = 0
         T_parts = None  # None = the scene poses read above
         for v in range(V):
             if vib_every and v and v % vib_every == 0:
                 timeline.play()
+                n_picked += pick_top(stage, rigid, paths, active, T_bin_w, T_w_bin, bin_geom,
+                                     plan[v // vib_every - 1] if plan else 0)
                 vibrate(bin_t_op, T_w_bin, vib, rng, rigid, active, bin_geom)
                 # parts that climbed onto the rim: hidden + parked; they stay in this scene's GT list, not visible
-                caught = active & ~remove_out_of_bin(stage, rigid, paths, active, T_w_bin, T_bin_w, bin_geom)
-                if caught.any():
+                n_parked = _PARKED["n"]
+                remove_out_of_bin(stage, rigid, paths, active, T_w_bin, T_bin_w, bin_geom)
+                if _PARKED["n"] > n_parked:  # newly parked parts: let their poses reach the physics readback
                     update(1)
                 apply_lights(stage, key_prim, proj_light, scene_lights, rng, float(lights.get("state_jitter", 0.0)),
                              float(lights.get("state_key_move_m", 0.0)))
                 p_v, q_v = (a.numpy().astype(np.float64) for a in rigid.get_world_poses())
                 T_parts = [T_bin_w @ make_T(quat_to_mat(q_v[k]), p_v[k]) for k in np.flatnonzero(active)]
+                pile = parts_in_bin(rigid, active, T_bin_w, bin_geom)
                 timeline.pause()
                 update(2)
-            T_bin_cam = sample_view(cfg.camera, cfg.bin, bin_geom, rng, jitter=(v > 0 or V == 1))
+            cam_dz, cam_xy = camera_offset(pile, eye_z0, bin_geom, rng, (intr.width / 2 / intr.fx, intr.height / 2 / intr.fy))
+            T_bin_cam = sample_view(cfg.camera, cfg.bin, bin_geom, rng, jitter=(v > 0 or V == 1), height_offset=cam_dz,
+                                    xy_offset=cam_xy)
             T_w_cam = T_w_bin @ T_bin_cam
             T_usd = T_w_cam.copy()
             T_usd[:3, :3] = T_w_cam[:3, :3] @ CV_TO_USD_CAM
@@ -490,16 +612,17 @@ def main():
             views.append(ViewCapture(np.asarray(rgb), np.asarray(depth, np.float32), inst, T_bin_w @ T_read, T_parts))
 
         slots = np.flatnonzero(active).tolist()
-        sc = SceneCapture(scene_id=shard * 100000 + idx, mode=mode, slots=slots,
+        sc = SceneCapture(scene_id=(id_base + idx) if id_base is not None else shard * 100000 + offset + idx,
+                          mode=mode, slots=slots,
                           types=[placements[k].type_idx for k in slots],
                           T_bin_part=[T_bin_w @ make_T(quat_to_mat(quat[k]), pos[k]) for k in slots],
                           views=views, save_viz=bool(viz_every) and idx % viz_every == 0,
-                          seed=int(rng.integers(1 << 31)), removed=int((~active).sum()))
+                          seed=int(rng.integers(1 << 31)), removed=int((~active).sum()), picked=n_picked)
         t_cap = time.monotonic() - t_cap
         writer.submit(save, sc, idx)  # labels + files on a writer thread while the next pile settles
         done += 1
         el = time.monotonic() - t0
-        print(f"[INFO] scene {idx + 1}/{total}: {len(slots)} parts ({sc.removed} escaped), mode={mode}, "
+        print(f"[INFO] scene {idx + 1}/{total}: {len(slots)} parts ({sc.removed} escaped, {n_picked} picked), mode={mode}, "
               f"settle {steps} updates {t_settle:.1f}s, capture {V} views {t_cap:.1f}s, scene {time.monotonic() - ts:.1f}s"
               f" | {done * V} images in {el:.0f}s = {done * V / el:.2f} img/s", flush=True)
 

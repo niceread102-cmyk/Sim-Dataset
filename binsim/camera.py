@@ -27,6 +27,13 @@ class Intrinsics:
                 "cx": self.cx, "cy": self.cy, "K": self.K.tolist()}
 
 
+def centred(intr: Intrinsics) -> Intrinsics:
+    """The same camera with the principal point at the image centre. The USD camera (focal length + apertures) of the
+    Isaac Sim renderer always projects the optical axis to the centre, whatever cx/cy the config gives, so this is the
+    K of the rendered images (checked: labels re-rendered with it match the saved masks 100 %, the config K 63 %)."""
+    return Intrinsics(intr.width, intr.height, intr.fx, intr.fy, (intr.width - 1) / 2.0, (intr.height - 1) / 2.0)
+
+
 def intrinsics_from_cfg(cam_cfg) -> Intrinsics:
     """K for the RENDERED image (resolution * render_scale). Pixel centers follow the OpenCV
     convention; scaling uses (c + 0.5) * s - 0.5 so the principal point stays consistent."""
@@ -67,9 +74,14 @@ def mount_eye_target(cam_cfg, bin_cfg, bin_geom: BinGeom):
     return eye, target, np.asarray(m.get("image_up_world", [1, 0, 0]), float)
 
 
-def sample_view(cam_cfg, bin_cfg, bin_geom: BinGeom, rng, jitter: bool = True) -> np.ndarray:
-    """4x4 camera-to-bin transform (OpenCV camera axes) for one view."""
+def sample_view(cam_cfg, bin_cfg, bin_geom: BinGeom, rng, jitter: bool = True, height_offset: float = 0.0,
+                xy_offset=(0.0, 0.0)) -> np.ndarray:
+    """4x4 camera-to-bin transform (OpenCV camera axes) for one view. height_offset (m) moves the camera eye up/down,
+    xy_offset (m, bin frame) moves eye and look-at point sideways (camera.follow_pile)."""
     eye, target, up = mount_eye_target(cam_cfg, bin_cfg, bin_geom)
+    shift = np.array([float(xy_offset[0]), float(xy_offset[1]), 0.0])
+    eye = eye + shift + np.array([0.0, 0.0, float(height_offset)])
+    target = target + shift
     roll = 0.0
     if jitter:
         j = cam_cfg.get("pose_jitter", {}) or {}

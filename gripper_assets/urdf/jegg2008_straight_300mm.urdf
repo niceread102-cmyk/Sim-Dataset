@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gripper-only straight-tip variant, 2026-10-01.
+     Previous 300 mm extension, motor, adapter and joint settings retained.
+     Distal tips straightened; corresponding collision meshes and TCP updated.
+     Mesh units: meters. Custom mass/inertia values are simulation estimates.
+     Physical strength/mounting and Isaac Sim runtime have not been verified. -->
+<!-- Sim-Dataset: copied from jegg2008_straight_300mm/jegg2008_straight_300mm.urdf; only mesh paths changed.
+     Root link `flange` = the robot link the gripper is attached to (scripts/robot_sim.py `gripper:`). -->
+<robot name="jegg2008_straight_plus300">
+  <link name="flange" />
+  <joint name="flange_mount_joint" type="fixed">
+    <parent link="flange" />
+    <child link="gripper_mount" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="gripper_mount">
+    <visual>
+      <origin xyz="0.004 0 0" rpy="0 1.570796327 0" />
+      <geometry>
+        <cylinder radius="0.04" length="0.008" />
+      </geometry>
+      <material name="mount_gray">
+        <color rgba="0.28 0.30 0.33 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.004 0 0" rpy="0 1.570796327 0" />
+      <geometry>
+        <cylinder radius="0.04" length="0.008" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.004 0 0" rpy="0 0 0" />
+      <mass value="0.1085734421" />
+      <inertia ixx="0.0001158116716" ixy="0" ixz="0" iyy="5.848489415e-05" iyz="0" izz="5.848489415e-05" />
+    </inertial>
+  </link>
+  <joint name="flange_to_gripper_motor" type="fixed">
+    <parent link="gripper_mount" />
+    <child link="gripper_motor" />
+    <origin xyz="0.008 0 0" rpy="0 1.570796327 0" />
+  </joint>
+  <link name="gripper_motor">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/visual/motor_body_m.stl" scale="1 1 1" />
+      </geometry>
+      <material name="motor_body_m_material">
+        <color rgba="0.60 0.65 0.70 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/motor_collision_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0.005499999046 0.0405" rpy="0 0 0" />
+      <mass value="0.2127513708" />
+      <inertia ixx="0.0001684040546" ixy="0" ixz="0" iyy="0.0001267047887" iyz="0" izz="6.246521927e-05" />
+    </inertial>
+  </link>
+  <link name="gripper_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/visual/left_slider_m.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_slider_m_material">
+        <color rgba="0.25 0.31 0.38 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/visual/left_finger_straight_m.stl" scale="1 1 1" />
+      </geometry>
+      <material name="left_finger_plus300_m_material">
+        <color rgba="0.72 0.75 0.80 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/left_slider_collision_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/left_finger_collision_0_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/left_finger_collision_1_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0.00804999934 0.2694075859" rpy="0 0 0" />
+      <mass value="0.0543888381" />
+      <inertia ixx="0.0006688663897" ixy="0" ixz="0" iyy="0.0006681628581" iyz="0" izz="1.646156553e-06" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/left_finger_collision_shaft_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_left_joint" type="prismatic">
+    <parent link="gripper_motor" />
+    <child link="gripper_left" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="0.004" effort="7" velocity="0.0325" />
+    <dynamics damping="2" friction="0.05" />
+  </joint>
+  <link name="gripper_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/visual/right_slider_m.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_slider_m_material">
+        <color rgba="0.25 0.31 0.38 1" />
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/visual/right_finger_straight_m.stl" scale="1 1 1" />
+      </geometry>
+      <material name="right_finger_plus300_m_material">
+        <color rgba="0.72 0.75 0.80 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/right_slider_collision_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/right_finger_collision_0_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/right_finger_collision_1_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 -0.00804999934 0.2694075859" rpy="0 0 0" />
+      <mass value="0.054388838" />
+      <inertia ixx="0.0006688663884" ixy="0" ixz="0" iyy="0.0006681628569" iyz="0" izz="1.64615655e-06" />
+    </inertial>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../meshes/jegg2008_straight_300mm/collision/right_finger_collision_shaft_m.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="gripper_right_joint" type="prismatic">
+    <parent link="gripper_motor" />
+    <child link="gripper_right" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 -1 0" />
+    <limit lower="0" upper="0.004" effort="7" velocity="0.0325" />
+    <dynamics damping="2" friction="0.05" />
+    <mimic joint="gripper_left_joint" multiplier="1" offset="0" />
+  </joint>
+  <link name="gripper_tcp" />
+  <joint name="gripper_tcp_joint" type="fixed">
+    <parent link="gripper_motor" />
+    <child link="gripper_tcp" />
+    <origin xyz="0 0 0.4613158493" rpy="0 0 0" />
+  </joint>
+</robot>

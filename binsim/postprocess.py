@@ -62,6 +62,7 @@ class SceneCapture:
     save_viz: bool = False
     seed: int = 0
     removed: int = 0               # parts that escaped the bin and were removed before capture
+    picked: int = 0                # parts removed from the top during the scene (loading.pick)
 
 
 def _write_ply(path, pts, cols):
@@ -102,8 +103,10 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
     rng = np.random.default_rng(sc.seed)
     K = ctx.K
     W, H = ctx.intr.width, ctx.intr.height
-    writer = SceneWriter(ctx.out_root, sc.scene_id, float(out_cfg.get("depth_scale", 0.1)),
-                         bool(out_cfg.get("save_clean_depth", False)))
+    depth_scale = float(out_cfg.get("depth_scale", 0.1))
+    writer = SceneWriter(ctx.out_root, sc.scene_id, depth_scale, bool(out_cfg.get("save_clean_depth", False)),
+                         out_cfg.get("folders"), cam_cfg.get("depth_range_m", [0.458, 1.118]),
+                         str(out_cfg.get("depth_vis_style", "phoxi")))
     coco = CocoScene([{"id": i + 1, "name": p["name"], "supercategory": "part"} for i, p in enumerate(ctx.part_cfgs)])
     n = len(sc.slots)
     lut_size = max(sc.slots) + 2 if sc.slots else 1
@@ -131,7 +134,10 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
         T_parts = v.T_bin_part if v.T_bin_part is not None else sc.T_bin_part
         scene_grasps, valid_per_part = grasps_for(T_parts)
         depth_clean = np.asarray(v.depth, np.float64)
-        depth = apply_depth_noise(depth_clean, K, cam_cfg, rng)
+        depth = apply_depth_noise(depth_clean, K, cam_cfg, rng, np.asarray(v.inst) >= 0)
+        # the PNG stores depth in depth_scale (mm) steps: round here so the saved file, viz and px_count_valid all
+        # use exactly the same values
+        depth = np.clip(np.round(depth * 1000.0 / depth_scale), 0, 65535) * depth_scale / 1000.0
         rgb = np.ascontiguousarray(v.rgb[..., :3])
         if cam_cfg.get("image_mode", "rgb") == "gray":
             rgb = to_gray(rgb)
@@ -192,7 +198,7 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
                 m_vis.append(mv)
             if do_coco and px_vis:
                 coco.add_instance_rle(im_id, ti + 1, rle_encode_crop(crop, bbox_visib[0], bbox_visib[1], H, W), px_vis,
-                                      bbox_visib, infos[-1]["visib_fract"])
+                                      bbox_visib, infos[-1]["visib_fract"], gt_idx=k)
             Tb = T_parts[k]
             parts_view.append({"label": k, "slot": sc.slots[k], "name": ctx.part_cfgs[ti]["name"], "obj_id": ti + 1,
                                "R": R, "t_mm": t_mm, "R_bin": Tb[:3, :3], "t_bin_mm": Tb[:3, 3] * 1000.0,
@@ -212,8 +218,9 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
                           "width_m": g.width, "approach_angle_deg": round(g.approach_angle_deg, 2),
                           "valid": bool(g.valid and visib[g.part] >= float(gcfg.get("min_visib", 0.6))),
                           "collision_free": g.valid, "reason": g.reason, "part_visib": round(float(visib[g.part]), 4)})
-        with open(os.path.join(writer.dir, "grasps", f"{im_id:06d}.json"), "w") as f:
-            json.dump({"topmost_gt_idx": top, "grasps": glist}, f)
+        if writer.enabled("grasps"):
+            with open(os.path.join(writer._sub("grasps"), f"{im_id:06d}.json"), "w") as f:
+                json.dump({"topmost_gt_idx": top, "grasps": glist}, f)
 
         # per-part 6DOF table
         rows = []
@@ -228,8 +235,8 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
                          "bin_qw": q_b[0], "bin_qx": q_b[1], "bin_qy": q_b[2], "bin_qz": q_b[3],
                          "bin_roll_deg": rb[0], "bin_pitch_deg": rb[1], "bin_yaw_deg": rb[2],
                          "n_valid_grasps": p["n_valid_grasps"], "is_topmost": p["label"] == top})
-        if rows:
-            with open(os.path.join(writer.dir, "poses", f"{im_id:06d}.csv"), "w", newline="") as f:
+        if rows and writer.enabled("poses"):
+            with open(os.path.join(writer._sub("poses"), f"{im_id:06d}.csv"), "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
                 w.writeheader()
                 for r in rows:
@@ -242,7 +249,7 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
         if out_cfg.get("pointcloud_ply", False):
             pts = backproject(depth, K)
             ok = depth > 0
-            _write_ply(os.path.join(writer.dir, "depth", f"{im_id:06d}.ply"), pts[ok].astype(np.float32), rgb[ok])
+            _write_ply(os.path.join(writer._sub("depth"), f"{im_id:06d}.ply"), pts[ok].astype(np.float32), rgb[ok])
 
         if sc.save_viz and out_cfg.get("viz", True) and (not viz_views or im_id < viz_views):
             vdir = os.path.join(ctx.out_root, "viz")
@@ -259,5 +266,5 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
     if out_cfg.get("coco", True):
         writer.write_json("scene_gt_coco.json", coco.data, indent=None)  # ~300 RLEs per image: keep it compact
     writer.write_json("scene_info.json", {"mode": sc.mode, "slots": sc.slots, "types": sc.types, "removed": sc.removed,
-                                          "seed": sc.seed, "num_valid_grasps": int(grasps_for(sc.T_bin_part)[1].sum())})
+                                          "seed": sc.seed, "num_views": len(sc.views), "picked": sc.picked, "num_valid_grasps": int(grasps_for(sc.T_bin_part)[1].sum())})
     return summary

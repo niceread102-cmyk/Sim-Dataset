@@ -8,3 +8,4 @@ grasps:
   enabled: true
 outputs:
   full_masks: true
+  folders: {grasps: true}
