@@ -1,0 +1,29 @@
+# Uses the FollowJointTrajectory action server provided by isaacsim/robot_sim.py as the controller as it is.
+# The action name is assembled as "<controller name>/<action_ns>", so here it is
+# /m20_traj_controller/follow_joint_trajectory — it must match the controller: value of isaacsim/configs/robots/robot_sim.yaml.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+# MoveIt stops a trajectory that runs longer than allowed_execution_duration_scaling x (planned duration) +
+# allowed_goal_duration_margin and reports TIMED_OUT (defaults: 1.2 and 0.5 s). The simulator always needs longer than
+# the plan: the arm follows with some lag and the controller waits until it has arrived. With the defaults a short move
+# (the rise to the approach pose, planned 0.9 s) failed by a few milliseconds: bound 1.58 s, the controller finished
+# 35 ms after MoveIt had stopped it.
+trajectory_execution:
+  allowed_execution_duration_scaling: 3.0
+  allowed_goal_duration_margin: 3.0
+
+moveit_simple_controller_manager:
+  controller_names:
+    - m20_traj_controller
+
+  m20_traj_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - J1
+      - J2
+      - J3
+      - J4
+      - J5
+      - J6

@@ -1,0 +1,35 @@
+# Pump cover. Settings copied from parts/side_plate_bp.yaml (scale, collision, material); mass from PUMP_COVER.usd.
+name: pump_cover
+mesh: ../../assets/pump_cover.stl   # 191.4 x 109.1 x 14.4 mm, 494k triangles; 75 open edges (of 741k): tiny gaps,
+                                    # the pipeline warns "not watertight" - harmless for rendering / convex hulls
+units: mm
+recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
+mass_kg: 0.217            # PUMP_COVER.usd physics:mass
+friction: 0.5             # PUMP_COVER.usd has no physics material -> PhysX defaults (friction 0.5, restitution 0)
+restitution: 0.0
+collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
+max_convex_hulls: 32      # same as side_plate_bp
+# Optional PhysX settings written into part.usd (unset = PhysX defaults). Tested with generate.py (Isaac Lab
+# backend): contact_offset_m 0.002 / max_depenetration_velocity 0.5 / 16 iterations made parts escape MORE.
+# physx: {contact_offset_m: 0.002, rest_offset_m: 0.0, max_depenetration_velocity: 0.5, max_linear_velocity: 5.0,
+#         solver_position_iterations: 16, solver_velocity_iterations: 1, enable_ccd: false}
+# OmniPBR (Base Color, Color Tint, Roughness Amount, Metallic Amount): side_plate_bp's material, base colour raised
+# 0.286 -> 0.40 (rendered colour = color x color_tint: 0.19 -> 0.26, ~40 % brighter), still fully metallic
+color: [0.40, 0.40, 0.40]
+color_tint: [0.66023165, 0.66022503, 0.66022503]
+roughness: 0.5
+metallic: 1.0
+
+# Measured from the mesh (2026-10-01): not symmetric - 180 deg about Z leaves 6.1 mm mean surface distance, 90 deg
+# 17.9 mm, flips 5.7 / 7.5 mm (side_plate_bp: 0.17 mm) -> no BOP symmetries.
+symmetry: null
+
+# Rests flat (thin axis = Z): used by loading.random.orientation flat / layer and by layers mode.
+layer_rpy_deg: [0, 0, 0]
+
+grasps:
+  # Suction points sampled automatically on flat patches of the mesh (stored in the asset cache).
+  suction_auto: {num: 48, seed: 0}
+  # Hand-defined grasps in the part frame (after recenter), meters:
+  suction: []               # - {pos: [0, 0, 0.005], normal: [0, 0, 1]}
+  parallel_jaw: []          # - {pos: [0, 0, 0], rpy_deg: [0, 0, 0], width_m: 0.03}

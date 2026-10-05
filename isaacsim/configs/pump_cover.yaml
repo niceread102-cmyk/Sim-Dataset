@@ -1,0 +1,43 @@
+# Pump cover dataset: everything from configs/default.yaml, plus the keys below (dicts merge, lists such as parts
+# replace).
+#   lab scripts/run_supervised.py --config configs/pump_cover.yaml --images 100000
+# Parts come stacked, not dropped: every part front side up (the raised features, +Z of the mesh), random yaw, put
+# down one by one onto the pile on its real shape, so they overlap and tilt like in the real bin. No shaking: pile
+# states change only by picking the top parts.
+defaults: [default]
+
+run:
+  output_dir: ~/IsaacSim/captures/bin_ds_pump_cover
+
+parts:
+  - config: parts/pump_cover.yaml
+    count: [35, 48]             # stacked flat before settling (tries 60): 40 parts ~17 cm, 45 ~19 cm high (rim 20 cm);
+                                # parts whose centre ends up above rim - 2 cm (settle.rim_clearance_m) are removed
+
+loading:
+  mode: stack
+  wall_margin_m: 0.02           # the walls taper: 464 x 309 mm at the floor, 500 x 345 at the rim (inner_size_m)
+  stack:
+    yaw_deg: 180                # random yaw +-180 deg
+    flip_prob: 0.0              # never upside down: front side up
+    tries: 60                   # random spots tried per part, the lowest is taken (filled like by hand); more = denser,
+                                # lower pile (20: 45 parts ~21 cm high, 60: ~19 cm)
+    gap_m: 0.003                # put down this far above the pile under it (placed, not dropped)
+    cell_m: 0.003               # pile height map resolution
+  settle:
+    max_tilt_deg: 75            # parts turned over while settling / after picks (front tilted more than this from up:
+                                # upside down or on edge) are removed like escaped ones; parts leaning on others stay
+  shake:
+    impulses: 0                 # no random kicks while settling (they throw parts around and turn them over)
+  vibrate:
+    amp_m: 0.0                  # no bin shaking between pile states ...
+    spread:
+      speed_mps: 0.0            # ... and no outward push of the top parts
+  pick:
+    end_left: [3, 15]           # top parts removed at every pile state (every 10 views) down to 3-15 left
+                                # (default [3, 60] is for ~300 parts)
+
+randomization:
+  part_materials: false         # every pump cover exactly as in parts/pump_cover.yaml (colour 0.40, roughness 0.5,
+                                # metallic 1.0); the default jitters roughness / metallic +-0.15 per part -> slightly
+                                # different shades. Lighting still varies per scene (same for all parts)

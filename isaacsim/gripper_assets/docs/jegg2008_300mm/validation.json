@@ -1,0 +1,35 @@
+{
+  "jegg2008_only_300mm.urdf": {
+    "links": 6,
+    "joints": 5,
+    "valid_tree": true,
+    "all_mesh_paths_exist": true,
+    "positive_masses_and_inertias": true
+  },
+  "m20_35_18d_jegg2008_300mm.urdf": {
+    "links": 16,
+    "joints": 15,
+    "valid_tree": true,
+    "all_mesh_paths_exist": true,
+    "positive_masses_and_inertias": true
+  },
+  "m20_35_18d_jegg2008_300mm_independent.urdf": {
+    "links": 16,
+    "joints": 15,
+    "valid_tree": true,
+    "all_mesh_paths_exist": true,
+    "positive_masses_and_inertias": true
+  },
+  "extension_mm": 300,
+  "symmetric_opening_mm": {
+    "0": -0.0,
+    "0.002": 4.0,
+    "0.004": 8.0
+  },
+  "closed_convex_gripper_collision_meshes": 13,
+  "gripper_points_outward_along_flange_x": true,
+  "not_executed": [
+    "Isaac Sim import/runtime",
+    "physical strength or bolt-fit validation"
+  ]
+}

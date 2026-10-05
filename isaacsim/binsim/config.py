@@ -1,0 +1,230 @@
+"""Experiment config: YAML with `defaults:` includes, per-part files, and dotted CLI overrides.
+
+    cfg = load_config("configs/default.yaml", ["run.num_envs=32", "loading.mode=layers"])
+    cfg.run.num_envs  -> 32
+
+Merge order (later wins): each file listed in `defaults:` -> the file itself -> CLI overrides.
+Part entries (`parts: [{config: parts/x.yaml, count: [5, 10]}]`) are expanded: the part file is
+loaded and the entry's own keys override it. Relative file paths are resolved against the YAML
+file they appear in, so configs can be moved around together with their assets.
+"""
+from __future__ import annotations
+
+import copy
+import os
+from typing import Any, Iterable
+
+import yaml
+
+# Keys whose string values are file paths (resolved relative to the YAML that defines them).
+PATH_KEYS = {"mesh", "usd", "collision_mesh", "output_dir", "cache_dir", "experience", "grasp_file"}
+
+
+class Cfg(dict):
+    """dict with attribute access (recursive). Plain dict underneath so it dumps to YAML/JSON."""
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError as e:
+            raise AttributeError(f"config has no key '{key}' (have: {list(self.keys())})") from e
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def get_path(self, dotted: str, default=None):
+        node: Any = self
+        for k in dotted.split("."):
+            if isinstance(node, dict) and k in node:
+                node = node[k]
+            elif isinstance(node, list) and k.isdigit() and int(k) < len(node):
+                node = node[int(k)]
+            else:
+                return default
+        return node
+
+
+def _wrap(obj):
+    if isinstance(obj, dict):
+        return Cfg({k: _wrap(v) for k, v in obj.items()})
+    if isinstance(obj, list):
+        return [_wrap(v) for v in obj]
+    return obj
+
+
+def to_plain(obj):
+    if isinstance(obj, dict):
+        return {k: to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_plain(v) for v in obj]
+    return obj
+
+
+def deep_merge(base: dict, over: dict) -> dict:
+    """Recursive merge; dicts merge, everything else (incl. lists) is replaced."""
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def _resolve_paths(node, base_dir: str):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in PATH_KEYS and isinstance(v, str) and v:
+                node[k] = resolve_path(v, base_dir)
+            else:
+                _resolve_paths(v, base_dir)
+    elif isinstance(node, list):
+        for v in node:
+            _resolve_paths(v, base_dir)
+    return node
+
+
+def resolve_path(p: str, base_dir: str) -> str:
+    # "{ISAACLAB_NUCLEUS_DIR}/..." placeholders and omniverse:// / http(s):// URLs resolve at runtime.
+    if p.startswith("{") or "://" in p:
+        return p
+    p = os.path.expandvars(os.path.expanduser(p))
+    if os.path.isabs(p):
+        return p
+    return os.path.normpath(os.path.join(base_dir, p))
+
+
+def _load_yaml_tree(path: str, _stack=()) -> dict:
+    path = os.path.abspath(path)
+    if path in _stack:
+        raise ValueError(f"circular `defaults:` include: {' -> '.join(_stack + (path,))}")
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    base_dir = os.path.dirname(path)
+    defaults = data.pop("defaults", []) or []
+    merged: dict = {}
+    for inc in defaults:
+        inc_path = resolve_path(inc if inc.endswith((".yaml", ".yml")) else inc + ".yaml", base_dir)
+        merged = deep_merge(merged, _load_yaml_tree(inc_path, _stack + (path,)))
+    _resolve_paths(data, base_dir)
+    return deep_merge(merged, data)
+
+
+def _expand_parts(parts: list, config_dir: str) -> list:
+    out = []
+    for i, entry in enumerate(parts or []):
+        entry = dict(entry)
+        part_file = entry.pop("config", None)
+        part = {}
+        if part_file:
+            part_file = resolve_path(part_file, config_dir)
+            part = _load_yaml_tree(part_file)
+        part = deep_merge(part, entry)
+        part.setdefault("name", f"part{i}")
+        out.append(part)
+    return out
+
+
+def apply_override(tree: dict, dotted: str, value: Any):
+    keys = dotted.split(".")
+    node: Any = tree
+    for k in keys[:-1]:
+        if isinstance(node, list):
+            node = node[int(k)]
+        else:
+            node = node.setdefault(k, {})
+    last = keys[-1]
+    if isinstance(node, list):
+        node[int(last)] = value
+    else:
+        node[last] = value
+
+
+def parse_overrides(items: Iterable[str]) -> list[tuple[str, Any]]:
+    out = []
+    for it in items or []:
+        if "=" not in it:
+            raise ValueError(f"override '{it}' must look like key.sub=value")
+        k, v = it.split("=", 1)
+        out.append((k.strip(), yaml.safe_load(v)))
+    return out
+
+
+def load_config(path: str, overrides: Iterable[str] = ()) -> Cfg:
+    tree = _load_yaml_tree(path)
+    for k, v in parse_overrides(overrides):
+        apply_override(tree, k, v)
+    # Parts are expanded after overrides so `parts.0.config=...` can swap a part file,
+    # then overrides are re-applied so `parts.0.mass_kg=...` beats the part file.
+    config_dir = os.path.dirname(os.path.abspath(path))
+    tree["parts"] = _expand_parts(tree.get("parts", []), config_dir)
+    for k, v in parse_overrides(overrides):
+        if k.startswith("parts."):
+            apply_override(tree, k, v)
+    for key in ("output_dir", "cache_dir"):
+        for section in ("run", "assets"):
+            v = tree.get(section, {}).get(key)
+            if isinstance(v, str):
+                tree[section][key] = resolve_path(v, config_dir)
+    cfg = _wrap(tree)
+    validate(cfg)
+    return cfg
+
+
+def _range(v, name, lo=None):
+    """Normalize a scalar or [min, max] into a (min, max) tuple."""
+    if isinstance(v, (int, float)):
+        v = [v, v]
+    if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] <= v[1]):
+        raise ValueError(f"{name} must be a number or [min, max] with min <= max, got {v!r}")
+    if lo is not None and v[0] < lo:
+        raise ValueError(f"{name} must be >= {lo}, got {v!r}")
+    return tuple(v)
+
+
+def validate(cfg: Cfg):
+    errs = []
+
+    def need(dotted):
+        if cfg.get_path(dotted) is None:
+            errs.append(f"missing required key: {dotted}")
+
+    for k in ("run.num_envs", "run.num_scenes", "run.views_per_scene", "bin", "camera.resolution",
+              "camera.intrinsics", "loading.mode"):
+        need(k)
+    if not cfg.get("parts"):
+        errs.append("`parts` must list at least one part")
+    for i, p in enumerate(cfg.get("parts", [])):
+        if not p.get("mesh"):
+            errs.append(f"parts[{i}] ({p.get('name')}) needs `mesh` (STEP/STL/OBJ/PLY path)")
+        try:
+            _range(p.get("count", 1), f"parts[{i}].count", lo=0)
+        except ValueError as e:
+            errs.append(str(e))
+    mode = cfg.get_path("loading.mode")
+    if mode not in ("random", "layers", "mixed", "stack"):
+        errs.append(f"loading.mode must be random|layers|mixed|stack, got {mode!r}")
+    b = cfg.get("bin", {})
+    if not b.get("mesh") and not b.get("size_m"):
+        errs.append("bin needs either `mesh` or `size_m` ([x, y, z] outer size in meters)")
+    if b.get("mesh") and not b.get("inner_size_m"):
+        errs.append("bin.mesh given: also set bin.inner_size_m ([x, y, z] usable inner volume)")
+    intr = cfg.get_path("camera.intrinsics") or {}
+    if intr and not ({"fx", "fy"} <= set(intr) or "hfov_deg" in intr):
+        errs.append("camera.intrinsics needs fx/fy(/cx/cy) or hfov_deg")
+    if errs:
+        raise ValueError("invalid config:\n  - " + "\n  - ".join(errs))
+
+
+def count_range(part) -> tuple[int, int]:
+    lo, hi = _range(part.get("count", 1), "count", lo=0)
+    return int(lo), int(hi)
+
+
+def as_range(v, name="value") -> tuple[float, float]:
+    return _range(v, name)
+
+
+def dump_config(cfg: Cfg, path: str):
+    with open(path, "w") as f:
+        yaml.safe_dump(to_plain(cfg), f, sort_keys=False)

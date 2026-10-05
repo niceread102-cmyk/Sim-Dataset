@@ -1,0 +1,11 @@
+# The PhoXi scanner actually used, serial PAJ-042: its own calibrated K (identical in every
+# photoneo harvesters advanced/Output/sam6d_captures/*/cam_K.json) and full resolution (their depth.png: 2472x2064).
+# Everything else (depth range, noise, mount, ...) comes from phoxi_m.yaml.
+defaults: [phoxi_m]
+camera:
+  model: PhoXi PAJ-042
+  resolution: [2472, 2064]      # full-res; intrinsics below are for this size
+  render_scale: 0.5             # render 1236x1032 = the same pixels as the sample viewer's Output/depth PNGs
+  intrinsics: {fx: 2824.2166, fy: 2823.9720, cx: 1235.5, cy: 1031.5}  # focal lengths of PAJ-042; the renderer
+                                # always puts the principal point at the image centre, so cx/cy = centre (PAJ-042:
+                                # 1257.18 / 1009.44, 22 px off - not reproducible; any other value is overridden)
