@@ -1,0 +1,15 @@
+# lab robot_sim.py robot:=ur5e    (URDF: ../../../assets/ur5e/urdf/ur5e.urdf, MoveIt: ros2 launch bringup/ur5e/launch/ur5e.launch.py)
+# Only the robot is here: the scene (bin, pile, basket, objects) is configs/map/map.yaml, the same for every robot.
+name: ur5e
+gripper: none                     # no gripper: the target of ee_6d is tool0 (the flange)
+gripper_topic: /gripper/command   # only used with a gripper
+gripper_material: null
+pos_m: [0.0, 0.0, 0.0]            # robot base in the world (m)
+rpy_deg: [0, 0, 0]
+joint_pos: {shoulder_lift_joint: -1.5708, elbow_joint: 1.5708, wrist_1_joint: -1.5708, wrist_2_joint: -1.5708}
+                                  # start pose (rad): ready pose, elbow up, tool pointing down (= SEED_Q of bringup/ur5e ik node)
+stiffness: 1600                   # joint drives, N*m/deg (the lite6 script's value, an arm of the same size; m20: 20000). Higher = less sag
+damping: 80                       # higher = less swinging, slower settling (m20: 1000)
+speed: 0.3                        # max joint speed = speed x URDF velocity limit
+physics_hz: 60                    # physics steps per simulated second (Isaac Sim default 60)
+controller: /ur5e_traj_controller # <controller>/joint_trajectory, <controller>/follow_joint_trajectory (bringup/ur5e/config/moveit_controllers.yaml)

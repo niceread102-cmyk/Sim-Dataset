@@ -150,6 +150,72 @@ def parse_overrides(items: Iterable[str]) -> list[tuple[str, Any]]:
     return out
 
 
+def _slug(name: str) -> str:
+    return "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_")
+
+
+def _find_part_file(obj: str, config_dir: str) -> str:
+    """configs/parts/<obj>.yaml: <obj> with or without .yaml, matched without regard to case, `-` and `_` (SUPPORT-INPUT_SHAFT);
+    a path to a yaml works too"""
+    path = os.path.expanduser(obj)
+    if path.endswith((".yaml", ".yml")) and os.path.isfile(path):
+        return os.path.abspath(path)
+    parts_dir = os.path.normpath(os.path.join(config_dir, "..", "parts"))
+    names = sorted(f for f in os.listdir(parts_dir) if f.endswith((".yaml", ".yml"))) if os.path.isdir(parts_dir) else []
+    want = _slug(os.path.splitext(os.path.basename(obj))[0] if obj.endswith((".yaml", ".yml")) else obj)
+    for f in names:
+        if _slug(os.path.splitext(f)[0]) == want:
+            return os.path.join(parts_dir, f)
+    raise ValueError(f"obj:={obj}: no part yaml in {parts_dir} (have: {', '.join(os.path.splitext(f)[0] for f in names if f != 'bin.yaml')}); "
+                     f"make one with make_object_config.py obj:=<name>")
+
+
+def expand_shorthand(items: Iterable[str], config_path: str) -> list[str]:
+    """Short command line words -> the dotted overrides they stand for (the other items are kept, and win over them):
+
+        obj:=<part>      parts.0.config=<configs/parts/<part>.yaml>   the part (first entry of `parts:`) that is placed in the bin
+        obj_num:=N       parts.0.count=[N, N]                         how many (N or [min, max]); without it the part yaml's `count:`
+                                                                      is used (make_object_config.py writes one), else map.yaml's
+        out:=DIR         run.output_dir=DIR
+        scenes:=N        run.num_scenes=N          piles = camera cycles
+        views:=N         run.views_per_scene=N     images per pile (scenes x views images in all)
+    Any other word of the form name:=value is an error (it would be ignored silently otherwise).
+    """
+    obj = num = out = None
+    extra = []
+    rest = []
+    for it in items or []:
+        if it.startswith("scenes:="):
+            extra.append(f"run.num_scenes={it[len('scenes:='):]}")
+        elif it.startswith("views:="):
+            extra.append(f"run.views_per_scene={it[len('views:='):]}")
+        elif it.startswith("obj:="):
+            obj = it[len("obj:="):]
+        elif it.startswith("obj_num:="):
+            num = it[len("obj_num:="):]
+        elif it.startswith("out:="):
+            out = it[len("out:="):]
+        elif it.split("=", 1)[0].endswith(":") and it.split(":=", 1)[0].isidentifier():
+            raise ValueError(f"unknown short word '{it}' (known: obj:=, obj_num:=, out:=, scenes:=, views:=)")
+        else:
+            rest.append(it)
+    if num is not None and obj is None:
+        raise ValueError("obj_num:= needs obj:=<part> (to change the count of map.yaml's part use parts.0.count=[min,max])")
+    new = list(extra)
+    if obj is not None:
+        part_file = _find_part_file(obj, os.path.dirname(os.path.abspath(config_path)))
+        new.append(f"parts.0.config={part_file}")
+        count = yaml.safe_load(num) if num is not None else (yaml.safe_load(open(part_file)) or {}).get("count")
+        if count is not None:
+            count = [count, count] if isinstance(count, int) else list(count)
+            new.append(f"parts.0.count={count}")
+    if out is not None:
+        new.append(f"run.output_dir={out}")
+    if new:
+        print("[INFO] short words -> " + " ".join(new), flush=True)
+    return new + rest
+
+
 def load_config(path: str, overrides: Iterable[str] = ()) -> Cfg:
     tree = _load_yaml_tree(path)
     for k, v in parse_overrides(overrides):

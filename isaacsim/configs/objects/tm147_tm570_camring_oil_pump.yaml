@@ -1,0 +1,26 @@
+# TM147-TM570_CAMRING-OIL_PUMP: made by make_object_config.py from assets/objects/TM147-TM570_CAMRING-OIL_PUMP.stl (mm).
+name: tm147_tm570_camring_oil_pump
+mesh: ../../../assets/objects/TM147-TM570_CAMRING-OIL_PUMP.stl   # 54.0 x 54.0 x 13.4 mm
+units: mm
+recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
+mass_kg: 0.0916       # volume 11.7 cm^3 x 7.85 g/cm^3
+friction: 0.5
+restitution: 0.0
+collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
+max_convex_hulls: 32
+color: [0.285714, 0.285711, 0.285711]
+color_tint: [0.660232, 0.660225, 0.660225]
+roughness: 0.5
+metallic: 1.0   # steel-like, as side_plate_bp
+count: [299, 333]   # parts per bin (rough: 40 % of the bin volume). Used by `obj:=` of generate_isaacsim.py; map.yaml's count wins
+
+# symmetry: {axis: [0, 0, 1], order: 2, flip: false}   # a part that maps onto itself (BOP symmetries); none = not symmetric
+
+# Thinnest side of the bounding box up when the parts are stacked in layers (loading.mode: layers).
+layer_rpy_deg: [0, 0, 0]
+
+grasps:
+  # Suction points sampled automatically on flat patches of the mesh (stored in the asset cache).
+  suction_auto: {num: 48, seed: 0}
+  suction: []               # - {pos: [0, 0, 0.005], normal: [0, 0, 1]}
+  parallel_jaw: []          # - {pos: [0, 0, 0], rpy_deg: [0, 0, 0], width_m: 0.03}

@@ -9,3 +9,14 @@ camera:
   intrinsics: {fx: 2824.2166, fy: 2823.9720, cx: 1235.5, cy: 1031.5}  # focal lengths of PAJ-042; the renderer
                                 # always puts the principal point at the image centre, so cx/cy = centre (PAJ-042:
                                 # 1257.18 / 1009.44, 22 px off - not reproducible; any other value is overridden)
+                                # (the real principal point is in `lens` below: it is kept when the lens is on)
+  lens:                         # the REAL lens of this scanner. The renderer is an ideal pinhole; the renders are bent into
+                                # the image the lens takes (binsim/lens.py): barrel distortion (the "convex lens" look of the
+                                # real textures), the principal point 22 px off the centre; depth, masks and labels follow.
+                                # camera.lens.enabled=false = ideal pinhole images (centred K) like before.
+    enabled: true
+    cx: 1257.1799               # principal point at `resolution` (px) = cam_K.json of the captures
+    cy: 1009.4404
+    distortion: {k1: -0.113349, k2: 0.157080, p1: 0.0002991, p2: -0.0001083, k3: -0.046687}  # OpenCV order k1 k2 p1 p2 k3.
+                                # Fitted to the point cloud + texture of real captures (sam6d_captures/PAJ-042_*/): the
+                                # pixel of every XYZ point is reproduced to 0.0001 px, the same on captures of different days

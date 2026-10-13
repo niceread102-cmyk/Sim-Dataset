@@ -1,0 +1,18 @@
+# Parameters of control/ik_node.py for the UFactory Lite6 with its gripper (python3 control/ik_node.py --config bringup/lite6/config/ik_node.yaml).
+base_frame: link_base
+group_name: lite6                 # config/lite6.srdf (the group ends at link_tcp)
+ee_link: link_tcp                 # between the gripper fingers (0.0836 m from link_eef); z axis = tool direction, rpy (180, 0, 0) = tool pointing down
+arm_joints: [joint1, joint2, joint3, joint4, joint5, joint6]
+tcp_offset: [0.0, 0.0, 0.0]       # m, TCP in the ee_link frame (link_tcp is the TCP itself)
+
+# IK seed (deg), in arm_joints order: the `init` pose of the lite6 setup (config/robots/lite6.yaml of my_lite6_control). The same
+# side of the IK solutions is always picked.
+ik_seed_deg: [0, 0, 90, 0, 90, 0]
+
+# Speed: fraction of the limits MoveIt uses (config/joint_limits.yaml: 2.14 rad/s, 10 rad/s^2)
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+
+# Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused. Example:
+# joint_limits_deg: {joint2: [-130, 130], joint5: [-110, 110]}
+joint_limits_deg: {}

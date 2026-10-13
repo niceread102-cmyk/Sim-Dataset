@@ -6,6 +6,8 @@ camera:
   resolution: [2064, 1544]      # full-res (3.2 MP mode) — intrinsics below are for this size
   render_scale: 0.5             # render at 1032x772 (K is scaled to match); 1.0 = full res, slower
   intrinsics: {fx: 2500.0, fy: 2500.0, cx: 1032.0, cy: 772.0}
+  lens: {}                      # real lens: {enabled, cx, cy, distortion: {k1, k2, p1, p2, k3}} (OpenCV model) - the renders
+                                # are bent into the image of that lens (binsim/lens.py); {} = ideal pinhole. See phoxi_paj042.yaml
   depth_range_m: [0.458, 1.118] # scanning range; depth outside is invalid (0), like the real sensor
   image_mode: gray              # gray (PhoXi texture) | rgb
   texture_normalize: 99         # exposure per image: gain so the 99th percentile -> 235 (black stays black).
@@ -27,6 +29,7 @@ camera:
     look_at_m: 0.02
     roll_deg: 4.0
   render_subframes: 2           # extra RTX frames after moving the camera (removes ghosting)
+  warmup_frames: 30             # extra RTX frames before the very first view of a run (its first frame is garbled otherwise)
   noise:                        # numbers may be [lo, hi] ranges: drawn per image
     enabled: true               # tuned against real PAJ-042 scans of the side-plate bin (2026-09-29): sharp outlines,
                                 # clean faces, holes = projector shadows + gaps between parts + steep flanks
@@ -54,7 +57,7 @@ camera:
         count: [1, 4]           # image, 1-100 px at full res, ~300-650 mm too far = 0.98-1.24 m). They are the max
         radius_px: [0.5, 3.0]   # of a min-max normalised view (sample viewer Output/depth: that is why the parts
         mm: [300, 650]          # there are mid gray, not white). {} = off
-    specular:                  # metal parts only: where the surface mirrors the projector into the camera the
+    specular:                   # metal parts only: where the surface mirrors the projector into the camera the
       angle_deg: [1.5, 3.5]     # sensor saturates -> no depth (normal within this angle of the mirror direction)
       prob: [0.3, 0.8]          # each highlight patch is lost whole with this probability ...
       dilate_px: 1

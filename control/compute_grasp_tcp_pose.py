@@ -1,11 +1,18 @@
 import numpy as np
-from rclpy.node import Node
 
 # Pose where the TCP points at the floor = Rx(180)
 DEFAULT_TCP_R = np.array([
                 [1,  0,  0],
                 [0, -1,  0],
                 [0,  0, -1],
+                ])
+
+# Same grip for an object lying upside down (its hole axis, the object z, points down, e.g. flipped by 180 deg about its y):
+# flip it back first, Ry(180), then use DEFAULT_TCP_R. Ry(180) @ Rx(180) = Rz(180). The TCP still points at the floor.
+FLIPPED_TCP_R = np.array([
+                [-1,  0, 0],
+                [ 0, -1, 0],
+                [ 0,  0, 1],
                 ])
 
 
@@ -50,13 +57,25 @@ def R_to_rpy(R):
 
 
 def main(args=None):
-    print("input object roll pitch yaw (deg) : ")
-    r, p, y = map(float, input().split())
+    print("input object [x y z] roll pitch yaw (deg) : ")
+    v = list(map(float, input().split()))
+    if len(v) not in (3, 6):
+        print("Invalid input. Enter 3 numbers (roll pitch yaw) or 6 numbers (x y z roll pitch yaw).")
+        return
+    xyz = v[:-3]                            # empty when only rpy is given; x y z are just carried through, not used in the math
+    r, p, y = v[-3:]
+    if xyz:
+        print("x : %.3f, y : %.3f, z : %.3f" % tuple(xyz))
+    R = rpy_to_R(r, p, y)
+    flipped = R[2, 2] < 0                   # the object z (hole axis) points below the horizon: the object is upside down
     print("R : %.1f, P : %.1f, Y : %.1f" % (r, p, y))
-    print(np.round(rpy_to_R(r, p, y), 4))
-    tcp_r, tcp_p, tcp_y = R_to_rpy(rpy_to_R(r, p, y) @ DEFAULT_TCP_R)
+    print(np.round(R, 4))
+    if flipped:
+        print("upside down (hole axis points down): flipped back by 180 deg about its y, then gripped from above like an upright one")
+    tcp_r, tcp_p, tcp_y = R_to_rpy(R @ (FLIPPED_TCP_R if flipped else DEFAULT_TCP_R))
     print("TCP R : %.1f, P : %.1f, Y : %.1f" % (tcp_r, tcp_p, tcp_y))
-    print("%.1f %.1f %.1f" % (tcp_r, tcp_p, tcp_y))   # to paste as-is after x y z into ee_6d.py
+    # to paste as-is into ee_6d.py: "x y z roll pitch yaw" if x y z were given, otherwise only "roll pitch yaw" (paste it after x y z)
+    print(" ".join(["%.3f" % c for c in xyz] + ["%.1f" % a for a in (tcp_r, tcp_p, tcp_y)]))
 
 
 if __name__ == '__main__':

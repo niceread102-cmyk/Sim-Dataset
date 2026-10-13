@@ -1,0 +1,23 @@
+# Uses the FollowJointTrajectory action server provided by isaacsim/run_isaacsim.py (CONTROLLERS list there).
+# The action name is assembled as "<controller name>/<action_ns>", so here it is /ur5e_traj_controller/follow_joint_trajectory.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+# MoveIt only moves the robot: its built-in execution time limit (TIMED_OUT) is switched off.
+trajectory_execution:
+  execution_duration_monitoring: false
+
+moveit_simple_controller_manager:
+  controller_names:
+    - ur5e_traj_controller
+
+  ur5e_traj_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint

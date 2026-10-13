@@ -1,0 +1,16 @@
+# Real blue bin from its STL: outer 520 x 365 x 200 mm. Included by configs/map/map.yaml (defaults:).
+# STL checked (2026-09-29): mm, origin at the bottom centre, +Z up, X = the 520 mm side, watertight, 218k triangles.
+# Perforated like the real bin (floor ~19 %, walls 8-15 % open); walls taper: inner 464 x 309 mm on the floor,
+# 485 x 330 at mid height, 500 x 345 at the rim (10 mm lip); floor top at z = 11.4 mm.
+bin:
+  name: myeonghwa_box
+  mesh: ../../../assets/objects/myeonghwa_box_520x365x200mm.stl  # null = procedural box of size_m (same outer size)
+  units: mm                   # units of the STL
+  size_m: [0.520, 0.365, 0.200]   # outer size (only used by the procedural box, mesh: null)
+  wall_thickness_m: 0.01      # procedural box only
+  inner_size_m: [0.500, 0.345, 0.1886]  # usable inner volume [x, y, z]: rim opening (x, y) so parts against the
+                              # tapered walls never count as outside the bin; z = rim 200 - floor 11.4 mm
+  floor_z_m: 0.0114           # inner floor top above the bin bottom (floor_z_m + inner z = rim height 0.200)
+  collision: none             # triangle mesh (fine for the kinematic bin; keeps the perforations) | convexDecomposition | sdf
+  color: [0.12, 0.25, 0.55]   # blue (the original value). [0.003, 0.0085, 0.03] matched the bin of the real photos (23, 37, 63)
+                              # in the renders but was too dark for this dataset

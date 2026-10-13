@@ -1,0 +1,16 @@
+# lab robot_sim.py robot:=lite6    (URDF: ../../../assets/lite6/urdf/lite6.urdf, MoveIt: ros2 launch bringup/lite6/launch/lite6.launch.py)
+# Only the robot is here: the scene (bin, pile, basket, objects) is configs/map/map.yaml, the same for every robot.
+name: lite6
+gripper: none                     # no separate gripper URDF: the lite6 gripper is part of lite6.urdf (see gripper_joints)
+gripper_joints: [finger_joint1]   # joints of lite6.urdf that <gripper_topic> drives (0 = lower limit = closed, 1 = upper = open); finger_joint2 mimics it
+gripper_topic: /gripper/command   # std_msgs/Float64
+gripper_material: null
+pos_m: [0.0, 0.0, 0.0]            # robot base in the world (m)
+rpy_deg: [0, 0, 0]
+joint_pos: {joint3: 1.5708, joint5: 1.5708}
+                                  # start pose (rad): the `init` pose of the lite6 setup [0, 0, pi/2, 0, pi/2, 0] (= ik_seed_deg of bringup/lite6)
+stiffness: 1600                   # joint drives, N*m/deg (prismatic: N/m): the lite6 script's value (m20: 20000). Higher = less sag
+damping: 80                       # higher = less swinging, slower settling (m20: 1000)
+speed: 0.3                        # max joint speed = speed x URDF velocity limit
+physics_hz: 60                    # physics steps per simulated second (Isaac Sim default 60)
+controller: /lite6_traj_controller # <controller>/joint_trajectory, <controller>/follow_joint_trajectory (bringup/lite6/config/moveit_controllers.yaml)

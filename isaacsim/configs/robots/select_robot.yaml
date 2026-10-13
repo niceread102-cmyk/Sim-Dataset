@@ -1,0 +1,4 @@
+# The robot `lab robot_sim.py` and `ros2 launch robot.launch.py` start: change the name and run again (a name on the command line wins: lab robot_sim.py robot:=ur5e).
+# Robots = the other files of this folder (made by isaacsim/make_robot_config.py robot:=<name> from assets/<name>/urdf/<name>.urdf).
+# The scene around the robot (bin, pile, basket, objects) is ../map/map.yaml and stays when the robot changes.
+robot: m20_35_18d_jegg2510n

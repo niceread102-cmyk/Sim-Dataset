@@ -1,0 +1,38 @@
+<?xml version="1.0" ?>
+<!--
+ur5e MoveIt2 SRDF for the simulated robot (assets/ur5e/urdf/ur5e.urdf). Group, home state and the disabled collision pairs are
+taken from ur_moveit_config (srdf/ur_macro.srdf.xacro of Universal_Robots_ROS2_Driver), written out for this one robot.
+-->
+<robot name="ur5e">
+
+  <!-- The whole 6-axis chain from base_link to tool0 as a single planning group -->
+  <group name="ur_manipulator">
+    <chain base_link="base_link" tip_link="tool0" />
+  </group>
+
+  <group_state name="home" group="ur_manipulator">
+    <joint name="elbow_joint" value="0" />
+    <joint name="shoulder_lift_joint" value="-1.5707" />
+    <joint name="shoulder_pan_joint" value="0" />
+    <joint name="wrist_1_joint" value="0" />
+    <joint name="wrist_2_joint" value="0" />
+    <joint name="wrist_3_joint" value="0" />
+  </group_state>
+
+  <!-- world is the fixed base -->
+  <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="base_link" />
+
+  <!-- Adjacent links always touch at the joint (self-collision false positives) -->
+  <disable_collisions link1="base_link" link2="base_link_inertia" reason="Adjacent" />
+  <disable_collisions link1="base_link_inertia" link2="shoulder_link" reason="Adjacent" />
+  <disable_collisions link1="tool0" link2="wrist_1_link" reason="Never" />
+  <disable_collisions link1="tool0" link2="wrist_2_link" reason="Never" />
+  <disable_collisions link1="tool0" link2="wrist_3_link" reason="Adjacent" />
+  <disable_collisions link1="forearm_link" link2="upper_arm_link" reason="Adjacent" />
+  <disable_collisions link1="forearm_link" link2="wrist_1_link" reason="Adjacent" />
+  <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent" />
+  <disable_collisions link1="wrist_1_link" link2="wrist_2_link" reason="Adjacent" />
+  <disable_collisions link1="wrist_1_link" link2="wrist_3_link" reason="Never" />
+  <disable_collisions link1="wrist_2_link" link2="wrist_3_link" reason="Adjacent" />
+
+</robot>

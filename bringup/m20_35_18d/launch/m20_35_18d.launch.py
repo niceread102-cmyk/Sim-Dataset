@@ -4,7 +4,7 @@
 
 The official FANUC fanuc_driver has no MoveIt config for this model (it supports CRX only), so this is a hand-made config.
 The controller that move_group sends trajectories to is the FollowJointTrajectory action provided by
-isaacsim/robot_sim.py (/m20_traj_controller/follow_joint_trajectory), and the current robot pose is taken as it is
+isaacsim/robot_sim.py (/m20_35_18d_traj_controller/follow_joint_trajectory), and the current robot pose is taken as it is
 from the /joint_states published by robot_sim.py — the Isaac Sim side is left untouched.
 
 Only files inside this Simulation folder are read (neither fanuc_ws nor colcon build is needed):
@@ -15,20 +15,20 @@ Only files inside this Simulation folder are read (neither fanuc_ws nor colcon b
 
 Preparation:
     source /opt/ros/jazzy/setup.bash
-    # Start the Isaac Sim side controller (/m20_traj_controller) first in a separate terminal:
+    # Start the Isaac Sim side controller (/m20_35_18d_traj_controller) first in a separate terminal:
     #   conda activate sim && cd isaacsim && lab robot_sim.py
 
 Run (from /home/v/project/Simulation):
     ros2 launch bringup/m20_35_18d/launch/m20_35_18d.launch.py   # robot_state_publisher + move_group + RViz + ik_node
     python3 control/ee_6d.py                                     # enter an ee target: x y z [roll pitch yaw]
 
-The /target_pose sent by ee_6d is received by ik_node (scripts/ik_node_m20.py), which solves IK and moves via the MoveGroup action.
-  - position = TCP (gripper tip, 0.4745 m from the flange along the tool z), orientation = fanuc_flange. Omitted rpy = 180 0 0 (tool pointing down)
+The /target_pose sent by ee_6d is received by ik_node (control/ik_node.py, parameters in config/ik_node.yaml), which solves IK and moves via the MoveGroup action.
+  - position = TCP (gripper tip, 0.4693 m from the flange along the tool z), orientation = fanuc_flange. Omitted rpy = 180 0 0 (tool pointing down)
 Options:
     sequence:=true   Start control/robot_sequence.py instead of ik_node. It goes to the home pose at start, and when a target (TCP)
                      is sent with ee_6d it runs the sequence approach -> insert -> open gripper -> rise -> home -> place pose
                      (above the basket) -> lower into the basket -> close gripper -> lift -> home. Its parameters are in
-                     control/robot_sequence.yaml (the basket itself is in isaacsim/configs/robots/robot_sim.yaml).
+                     isaacsim/configs/sequence/robot_sequence.yaml (the basket itself is scene: basket: of isaacsim/configs/map/map.yaml).
     ik_node:=false   Start no control node at all (when running another control node by hand).
 ik_node and robot_sequence.py receive the same /target_pose, so running them at the same time puts two MoveGroup goals
 into move_group for one target and it dies (segfault). That is why sequence:=true automatically leaves ik_node out.
@@ -47,8 +47,8 @@ BRINGUP_DIR = Path(__file__).resolve().parents[1]  # Simulation/bringup/m20_35_1
 SIM_DIR = BRINGUP_DIR.parents[1]                   # Simulation/
 CONFIG_DIR = BRINGUP_DIR / "config"
 RVIZ_FILE = BRINGUP_DIR / "rviz" / "demo.rviz"
-URDF_FILE = SIM_DIR / "control" / "m20_35_18d" / "urdf" / "m20_35_18d.urdf"
-IK_NODE = BRINGUP_DIR / "scripts" / "ik_node_m20.py"
+URDF_FILE = SIM_DIR / "assets" / "m20_35_18d" / "urdf" / "m20_35_18d.urdf"
+IK_NODE = SIM_DIR / "control" / "ik_node.py"  # generic, the robot is in config/ik_node.yaml
 SEQUENCE_NODE = SIM_DIR / "control" / "robot_sequence.py"
 
 
@@ -95,10 +95,15 @@ def launch_setup(context, *args, **kwargs):
         parameters=[robot_description],
     )
 
+    # move_group has died with exit code -11 right after a second MoveGroup goal arrived while a trajectory was still
+    # executing (e.g. RViz Plan & Execute pressed during an ee_6d move). RViz then keeps printing "MoveGroup action
+    # client/server not ready" and nothing moves until the whole launch is restarted, so it is started again by itself.
     move_group = Node(
         package="moveit_ros_move_group",
         executable="move_group",
         output="screen",
+        respawn=True,
+        respawn_delay=2.0,
         parameters=[{
             **robot_description,
             **robot_description_semantic,
@@ -127,16 +132,16 @@ def launch_setup(context, *args, **kwargs):
 
     # Control node that receives the ee target (/target_pose) and moves. Both receive the same /target_pose, so only one is started:
     #   sequence:=true  -> robot_sequence.py (home -> approach/insert -> gripper -> rise -> place -> basket -> home sequence)
-    #   otherwise ik_node:=true (default) -> ik_node_m20.py (solves one target with IK and moves)
+    #   otherwise ik_node:=true (default) -> ik_node.py (solves one target with IK and moves)
     # They are scripts, not package executables, so they are started with ExecuteProcess (sys.executable = the system
     # python that runs ros2 launch: it has rclpy/scipy).
     use_sequence = LaunchConfiguration("sequence").perform(context).lower() == "true"
     use_ik_node = LaunchConfiguration("ik_node").perform(context).lower() == "true" and not use_sequence
     controllers = []
     if use_ik_node:
-        controllers.append(ExecuteProcess(cmd=[sys.executable, str(IK_NODE)], name="ik_node_m20", output="screen"))
+        controllers.append(ExecuteProcess(cmd=[sys.executable, str(IK_NODE), "--config", str(CONFIG_DIR / "ik_node.yaml")], name="ik_node", output="screen"))
     if use_sequence:
-        controllers.append(ExecuteProcess(cmd=[sys.executable, str(SEQUENCE_NODE)], name="robot_sequence", output="screen"))
+        controllers.append(ExecuteProcess(cmd=[sys.executable, str(SEQUENCE_NODE), "--robot", "m20_35_18d"], name="robot_sequence", output="screen"))
 
     return [GroupAction([robot_state_publisher, move_group, rviz, *controllers])]
 
@@ -144,7 +149,7 @@ def launch_setup(context, *args, **kwargs):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("ik_node", default_value="true",
-                              description="Also run ik_node_m20.py, which receives the ee target (/target_pose) and moves"),
+                              description="Also run ik_node.py, which receives the ee target (/target_pose) and moves"),
         DeclareLaunchArgument("sequence", default_value="false",
                               description="Run control/robot_sequence.py (home -> approach/insert -> gripper -> rise -> place -> basket -> home sequence) instead of ik_node"),
         OpaqueFunction(function=launch_setup),

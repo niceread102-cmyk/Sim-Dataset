@@ -1,9 +1,0 @@
-# UR10 + Robotiq 2F-85 style parallel-jaw gripper (collision model is parametric boxes).
-defaults: [ur10_suction]
-gripper:
-  type: parallel_jaw
-  parallel_jaw:
-    max_width_m: 0.085
-    finger_size_m: [0.020, 0.008, 0.040]   # x (along jaw face), y (thickness), z (length)
-    palm_size_m: [0.060, 0.120, 0.050]      # sits behind the fingers along -Z
-  primitives: []                            # fingers/palm are generated from parallel_jaw at the grasp width

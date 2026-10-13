@@ -1,0 +1,24 @@
+# Uses the FollowJointTrajectory action server provided by isaacsim/robot_sim.py (controller: of configs/robots/r2000ic_165f.yaml)
+# or isaacsim/run_isaacsim.py (CONTROLLERS list there). The action name is assembled as "<controller name>/<action_ns>", so here it is
+# /r2000ic_165f_traj_controller/follow_joint_trajectory.
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+# MoveIt only moves the robot: its built-in execution time limit (TIMED_OUT) is switched off.
+trajectory_execution:
+  execution_duration_monitoring: false
+
+moveit_simple_controller_manager:
+  controller_names:
+    - r2000ic_165f_traj_controller
+
+  r2000ic_165f_traj_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - J1
+      - J2
+      - J3
+      - J4
+      - J5
+      - J6

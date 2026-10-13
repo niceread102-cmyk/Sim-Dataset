@@ -1,0 +1,27 @@
+# The camera of the real colour photos of the blue side-plate bin (1952 x 1460, 2026-10-12 samples).
+# Everything not set here (depth range, noise, mount, texture exposure) comes from phoxi_m.yaml. The PAJ-042 preset
+# (phoxi_paj042.yaml, 2472 x 2064) is unchanged: switch `defaults` in configs/map/map.yaml to use it again.
+#
+# Measured from the photos, NOT from a calibration file: the outline of the bin rim (the STL of parts/bin.yaml, a
+# rounded rectangle 520 x 365 mm in one plane) was fitted to the rim seen in the photos (pose of the camera + radial
+# distortion): median error 1.7 px along the rim, against 13 px for an ideal pinhole. Undistorted with the values below
+# the rim, the wall slots and the hole columns of the walls come out straight (checked by eye).
+#  - distortion: strong barrel (the "convex" look): k1 pulls the corners of the image in by ~9 %. The pixel-space
+#    effect is fixed by the photos, k1 itself scales with f^2 (k1 / f^2 = -6.4e-8 px^-2): if you change fx / fy, scale k1
+#  - fx = fy = 2364 is an ASSUMPTION (the PhoXi M datasheet value scaled to this image size). With it the fit puts the
+#    camera 0.59 m above the rim = the mount of phoxi_m.yaml (height_above_rim_m 0.60), and the bin fills the frame like
+#    in the photos (the walls are cut left and right). A different f only moves that distance (f / distance stays)
+#  - the principal point comes out at the image centre (976.4 / 729.4 against 975.5 / 729.5): kept at the centre
+defaults: [phoxi_m]
+camera:
+  model: PhoXi colour photo 1952x1460
+  resolution: [1952, 1460]      # full-res = the size of the real photos; intrinsics below are for this size
+  render_scale: 0.5             # render + write 976x730 (the same pixels as the half-res PAJ-042 data, 1/4 of the render
+                                # cost); 1.0 = the size of the photos (~2.4x slower), or halve the photos before inference
+  intrinsics: {fx: 2364.0, fy: 2364.0, cx: 975.5, cy: 729.5}
+  lens:
+    enabled: true
+    cx: 975.5
+    cy: 729.5
+    distortion: {k1: -0.3594}   # OpenCV order k1 k2 p1 p2 k3 (the others 0). Fitting k2 too changed little (k1 -0.23, k2 -0.40,
+                                # median error 1.9 px): one parameter is enough for this image

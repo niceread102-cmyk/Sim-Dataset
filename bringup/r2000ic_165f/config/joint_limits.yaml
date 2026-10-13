@@ -1,0 +1,36 @@
+# The velocity values of the URDF (= fanuc_r2000_description r2000ic_165f_urdf_macro.xacro: 130/115/125/180/180/260 deg/s)
+# are used as they are. The acceleration spec is not in the official material, so the value that MoveIt's time-optimal
+# trajectory generation (TOTG, AddTimeOptimalParameterization) requires is set to 2x the velocity (reaches max speed within
+# 0.5 s, the same estimate as bringup/m20_35_18d). With has_acceleration_limits: false, TOTG itself throws an "undefined"
+# error and nothing can be executed at all.
+joint_limits:
+  J1:
+    has_velocity_limits: true
+    max_velocity: 2.2689280275926285
+    has_acceleration_limits: true
+    max_acceleration: 4.537856055185257
+  J2:
+    has_velocity_limits: true
+    max_velocity: 2.007128639793479
+    has_acceleration_limits: true
+    max_acceleration: 4.014257279586958
+  J3:
+    has_velocity_limits: true
+    max_velocity: 2.181661564992912
+    has_acceleration_limits: true
+    max_acceleration: 4.363323129985824
+  J4:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
+    has_acceleration_limits: true
+    max_acceleration: 6.283185307179586
+  J5:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
+    has_acceleration_limits: true
+    max_acceleration: 6.283185307179586
+  J6:
+    has_velocity_limits: true
+    max_velocity: 4.537856055185257
+    has_acceleration_limits: true
+    max_acceleration: 9.075712110370514

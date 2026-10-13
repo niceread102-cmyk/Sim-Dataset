@@ -1,0 +1,20 @@
+# Parameters of control/ik_node.py for the FANUC M-20iD/35 (python3 control/ik_node.py --config bringup/m20_35_18d/config/ik_node.yaml).
+base_frame: base_link
+group_name: arm                   # config/m20_35_18d.srdf
+ee_link: fanuc_flange             # the flange front-face frame (z axis = tool direction), so rpy (180, 0, 0) = tool pointing down
+arm_joints: [J1, J2, J3, J4, J5, J6]
+# TCP (gripper finger tip) in the fanuc_flange frame: gripper_tcp of the JEGG-2510N original fingers
+# (assets/jegg2510n_original_fingers/urdf/jegg2510n_original_fingers.urdf) = adapter 8 mm + motor rear to finger tip 461.316 mm = 469.316 mm.
+# Without a gripper use [0, 0, 0].
+tcp_offset: [0.0, 0.0, 0.469316]
+
+# IK seed (deg), in arm_joints order: ready pose, elbow up, tool pointing down (J5 = -90). The same side of the IK solutions is always picked.
+ik_seed_deg: [0, 0, 0, 0, -90, 0]
+
+# Speed: fraction of the limits MoveIt uses (config/joint_limits.yaml: 180/180/200/350/350/400 deg/s)
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+
+# Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused. Example:
+# joint_limits_deg: {J1: [-150, 150], J5: [-120, 120]}
+joint_limits_deg: {}

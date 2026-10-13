@@ -1,0 +1,27 @@
+# Matched to the same key structure as fanuc_moveit_config/config/ompl_planning.yaml of fanuc_driver (for CRX, a verified
+# working version) — the MoveIt2 (Jazzy) installed in this workspace does not accept the old (Humble) structure with a single
+# planning_plugin (singular) / request_adapters, and requires the split structure
+# planning_plugins (plural) + request_adapters/response_adapters.
+planning_plugins:
+  - ompl_interface/OMPLPlanner
+request_adapters:
+  - default_planning_request_adapters/ResolveConstraintFrames
+  - default_planning_request_adapters/ValidateWorkspaceBounds
+  - default_planning_request_adapters/CheckStartStateBounds
+  - default_planning_request_adapters/CheckStartStateCollision
+response_adapters:
+  - default_planning_response_adapters/AddTimeOptimalParameterization
+  - default_planning_response_adapters/ValidateSolution
+  - default_planning_response_adapters/DisplayMotionPath
+
+planner_configs:
+  RRTConnect:
+    type: geometric::RRTConnect
+    range: 0.0
+
+ur_manipulator:
+  default_planner_config: RRTConnect
+  planner_configs:
+    - RRTConnect
+  projection_evaluator: joints(shoulder_pan_joint,shoulder_lift_joint)
+  longest_valid_segment_fraction: 0.01

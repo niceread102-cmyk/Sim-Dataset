@@ -1,0 +1,21 @@
+# Copied from ur_moveit_config/config/joint_limits.yaml (Universal_Robots_ROS2_Driver). The velocity / position limits come from
+# the URDF (assets/ur5e/urdf/ur5e.urdf); MoveIt needs the accelerations for time parametrization (TOTG), they are conservative.
+joint_limits:
+  shoulder_pan_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  shoulder_lift_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  elbow_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_1_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_2_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
+  wrist_3_joint:
+    has_acceleration_limits: true
+    max_acceleration: 5.0
