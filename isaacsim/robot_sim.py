@@ -174,7 +174,7 @@ def load_settings(path, name, gripper):
             print(f"[WARN] {MAP_FILE} not usable ({type(e).__name__}: {e}): starting the robot without objects, bin and basket", flush=True)
     objects = []
     for o in scene.get("objects") or []:
-        f = os.path.join(REPO, "configs", "parts", f"{o['part']}.yaml")
+        f = os.path.join(REPO, "configs", "objects", f"{o['part']}.yaml")
         if not os.path.isfile(f):
             print(f"[WARN] object {o['part']} skipped: part config not found: {f}", flush=True)
             continue
@@ -192,7 +192,7 @@ def load_settings(path, name, gripper):
         seed = int.from_bytes(os.urandom(4), "big") if seed is None or str(seed).lower() == "random" else int(seed)
         part, count = None, int(pile.get("count", 0))
         if pile.get("part"):
-            f = os.path.join(REPO, "configs", "parts", f"{pile['part']}.yaml")
+            f = os.path.join(REPO, "configs", "objects", f"{pile['part']}.yaml")
             if os.path.isfile(f):
                 part = _load_yaml_tree(f)
             else:
@@ -233,7 +233,10 @@ if importlib.util.find_spec("rclpy") is None:
     sys.exit("rclpy not found: source ROS 2 first (source /opt/ros/jazzy/setup.bash)")
 args.experience = args.experience or os.path.expanduser(
     "~/IsaacSim/apps/isaacsim.exp.base.kit")  # same kit as generate_isaacsim.py
-if not args.headless:
+# Isaac Lab 3.0.0's KitLauncher has no --headless CLI flag: HEADLESS env var forces headless
+headless = bool(int(os.environ.get("HEADLESS", "0")))
+args.headless = headless
+if not headless:
     args.visualizer = args.visualizer or ["kit"]
 simulation_app = AppLauncher(args).app
 

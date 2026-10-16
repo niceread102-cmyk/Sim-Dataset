@@ -43,8 +43,12 @@ if os.path.isdir(_out) and any(d.isdigit() for d in os.listdir(_out)) and not cf
              f"(generate_supervisor.py picks a new one itself), delete the folder, or set run.overwrite=true")
 args.experience = os.path.expanduser(cfg.sim.get("experience")
                                      or "~/IsaacSim/apps/isaacsim.exp.base.kit")
-args.headless = bool(args.headless or cfg.sim.get("headless", False))
-if not args.headless:
+# Isaac Lab 3.0.0's KitLauncher has no --headless CLI flag: headless is set via the HEADLESS env var
+# (honored by KitLauncher._resolve_headless_settings) or the config's sim.headless. Expose it as
+# args.headless so AppLauncher/KitLauncher see it, and only add the Kit GUI visualizer when not headless.
+headless = bool(int(os.environ.get("HEADLESS", "0")) or cfg.sim.get("headless", False))
+args.headless = headless
+if not headless:
     args.visualizer = ["kit"]
 _kit_args = " ".join(a for a in (getattr(args, "kit_args", "") or "", str(cfg.sim.get("kit_args") or "")) if a.strip())
 if _kit_args:

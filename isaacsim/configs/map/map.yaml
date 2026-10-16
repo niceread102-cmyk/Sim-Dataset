@@ -1,9 +1,9 @@
 # Bin-picking dataset experiment. Override any leaf on the CLI:
 # python scripts/generate.py --config configs/default.yaml run.num_envs=32 loading.mode=layers
 # Presets (camera / bin) are merged first; keys below override them.
-defaults: [../cameras/phoxi_1952x1460, ../parts/bin]  # phoxi_1952x1460 = the real colour photos (size, K, lens),
+defaults: [../cameras/phoxi_1952x1460, ../objects/bin]  # phoxi_1952x1460 = the real colour photos (size, K, lens),
                               # phoxi_paj042 = the PAJ-042 scanner's calibrated K (2472 x 2064), phoxi_m = datasheet guess;
-                              # parts/bin = the real blue bin (STL, size, colour)
+                              # objects/bin = the real blue bin (STL, size, colour)
 
 scene:                        # robot_sim.py (lab robot_sim.py): what stands around the robot, the same for every robot
                               # (robot: robots/select_robot.yaml). World = robot base frame (m): the positions have to be inside the
@@ -80,7 +80,7 @@ run:
 assets:
   cache_dir: ../../assets_cache  # converted STL/USD/PLY (keyed by source hash + settings)
 
-bin:                          # mesh / size / colour: configs/parts/bin.yaml (keys set here would override it)
+bin:                          # mesh / size / colour: configs/objects/bin.yaml (keys set here would override it)
   pos_m: [0.0, 0.0, 0.0]      # bin frame origin (bottom center) in the env frame
   rpy_deg: [0, 0, 0]
   friction: 0.5
@@ -90,7 +90,7 @@ floor:                        # what the bin stands on (generate_isaacsim.py)
                               # which came out light grey, brighter than the metal)
 
 parts:                        # one or more part types; each scene samples a count per type
-  - config: ../parts/support_input_shaft.yaml
+  - config: ../objects/support_input_shaft.yaml
     count: [280, 300]
 
 loading:

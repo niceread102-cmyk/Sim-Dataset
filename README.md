@@ -8,7 +8,7 @@ Bin-picking simulation in Isaac Sim with robot control through ROS 2 / MoveIt 2.
 |---|---|
 | Architecture | aarch64 (ARM64, NVIDIA DGX Spark / GB10) |
 | OS | Ubuntu 24.04.4 LTS |
-| Isaac Sim | v6.2.0 |
+| Isaac Sim | v6.2.0 GA |
 | Isaac Lab | v3.0.0 GA |
 | Python | 3.12.13 |
 | Conda | 26.3.2 |
