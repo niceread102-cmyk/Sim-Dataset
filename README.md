@@ -8,15 +8,15 @@ Bin-picking simulation in Isaac Sim with robot control through ROS 2 / MoveIt 2.
 |---|---|
 | Architecture | aarch64 (ARM64, NVIDIA DGX Spark / GB10) |
 | OS | Ubuntu 24.04.4 LTS |
-| Isaac Sim | v6.0.0-rc.59 |
-| Isaac Lab | v3.0.0-beta |
+| Isaac Sim | v6.2.0 |
+| Isaac Lab | v3.0.0 GA |
 | Python | 3.12.13 |
 | Conda | 26.3.2 |
 | ROS 2 | Jazzy (+ MoveIt 2: `sudo apt install ros-jazzy-moveit`) |
 
 Install Isaac Sim and Isaac Lab first and create a conda environment for them (this README calls it `sim`):
-- Isaac Sim: https://github.com/isaac-sim/IsaacSim/tree/v6.0.0
-- Isaac Lab: https://github.com/isaac-sim/IsaacLab/tree/v3.0.0-beta
+- Isaac Sim: https://github.com/isaac-sim/IsaacSim/tree/v6.2.0
+- Isaac Lab: https://github.com/isaac-sim/IsaacLab/tree/v3.0.0
 
 We run Isaac Sim from `~/IsaacSim` (built from source). If yours is somewhere else, change `sim.experience` in `isaacsim/configs/map/map.yaml`.
 If you hit a version or dependency error, resolve it for your own setup.
