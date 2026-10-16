@@ -42,7 +42,7 @@ camera:                       # overrides of the camera preset above (configs/ca
 sim:
   backend: isaacsim           # isaacsim = scripts/generate_isaacsim.py (works here) | isaaclab = original Isaac Lab path
                               # (on this machine parts explode out of the bin); scripts/generate.py follows this
-  experience: ~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit  # Isaac Sim Base 6.0.0. The Full kit's extra
+  experience: ~/IsaacSim/apps/isaacsim.exp.base.kit  # Isaac Sim Base 6.2.0. The Full kit's extra
                               # extensions (anim/people, physics variant switcher) crash or freeze scripted runs on this machine
   headless: false             # false = open the Isaac Sim window
   device: cuda:0

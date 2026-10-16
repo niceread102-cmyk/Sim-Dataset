@@ -42,7 +42,7 @@ if os.path.isdir(_out) and any(d.isdigit() for d in os.listdir(_out)) and not cf
     sys.exit(f"[ERROR] {os.path.dirname(_out)} already has scenes - they would be overwritten. Use another run.shard_id "
              f"(generate_supervisor.py picks a new one itself), delete the folder, or set run.overwrite=true")
 args.experience = os.path.expanduser(cfg.sim.get("experience")
-                                     or "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.full.kit")
+                                     or "~/IsaacSim/apps/isaacsim.exp.base.kit")
 args.headless = bool(args.headless or cfg.sim.get("headless", False))
 if not args.headless:
     args.visualizer = ["kit"]

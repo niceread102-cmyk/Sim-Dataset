@@ -124,7 +124,7 @@ def camera_pose_ros(cam):
     """Camera world poses in the ROS/OpenCV optical convention -> (pos (N,3), quat_wxyz (N,4))."""
     d = cam.data
     pos = to_numpy(d.pos_w)
-    quat = to_numpy(_first_attr(d, ["quat_w_ros", "quat_w_opencv"]))
+    quat = to_numpy(_first_attr(d, ["quat_w_ros", "quat_w_opengl", "quat_w_world", "quat_w_opencv"]))
     return pos.astype(np.float64), from_sim_quat(quat)
 
 
