@@ -232,7 +232,7 @@ robot = load_settings(os.path.abspath(args.config), args.name, args.gripper)  # 
 if importlib.util.find_spec("rclpy") is None:
     sys.exit("rclpy not found: source ROS 2 first (source /opt/ros/jazzy/setup.bash)")
 args.experience = args.experience or os.path.expanduser(
-    "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit")  # same kit as generate_isaacsim.py
+    "~/IsaacSim/apps/isaacsim.exp.base.kit")  # same kit as generate_isaacsim.py
 if not args.headless:
     args.visualizer = args.visualizer or ["kit"]
 simulation_app = AppLauncher(args).app
