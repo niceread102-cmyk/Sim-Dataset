@@ -1,11 +1,17 @@
-# SIDE-PLATE: made by make_object_config.py from assets/objects/SIDE-PLATE.stl (mm).
+# SIDE-PLATE: made by make_object_config.py from assets/objects/stl/SIDE-PLATE.stl (mm).
 name: side_plate
-mesh: ../../../assets/objects/SIDE-PLATE.stl   # 55.6 x 55.6 x 20.9 mm, not watertight (PhysX warns)
+mesh: ../../../assets/objects/stl/SIDE-PLATE.stl   # 55.6 x 55.6 x 20.9 mm, not watertight (PhysX warns)
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
 mass_kg: 0.1331       # volume 17.0 cm^3 x 7.85 g/cm^3
 friction: 0.5
 restitution: 0.0
+# physx (stiff contact for a finger pushing hard on the thin 2-3 mm hole wall): robot_sim.py CLICK_PHYSX applies it to the clicked part only. On every part (~120 free ones) it made the sim crawl.
+# physx:
+#   solver_position_iterations: 16
+#   solver_velocity_iterations: 2
+#   max_depenetration_velocity: 0.5   # m/s
+#   enable_ccd: true
 collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
 max_convex_hulls: 32
 color: [0.285714, 0.285711, 0.285711]

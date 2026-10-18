@@ -1,11 +1,13 @@
 # Parameters of control/ik_node.py for the FANUC R-2000iC/165F (python3 control/ik_node.py --config bringup/r2000ic_165f/config/ik_node.yaml).
-base_frame: base_link
+base_frame: world   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts pos_m / rpy_deg of configs/robots/<name>.yaml into MoveIt's URDF)
 group_name: arm                   # config/r2000ic_165f.srdf
 ee_link: fanuc_flange             # the flange front-face frame (z axis = tool direction), so rpy (180, 0, 0) = tool pointing down
 arm_joints: [J1, J2, J3, J4, J5, J6]
 tcp_offset: [0.0, 0.0, 0.0]       # m, TCP in the ee_link frame (no gripper: the flange itself)
 
-# IK seed (deg), in arm_joints order: ready pose, elbow up, tool pointing down (J5 = -90). The same side of the IK solutions is always picked.
+# IK seed (deg), in arm_joints order: ready pose, elbow up, tool pointing down (J5 = -90).
+# ik_node.py solves from the current joint angles: this pose is only its start before /joint_states arrives (and the start of the
+# first IK of control/robot_sequence.py).
 ik_seed_deg: [0, 0, 0, 0, -90, 0]
 
 # Speed: fraction of the limits MoveIt uses (velocity from the URDF, acceleration from config/joint_limits.yaml)
@@ -15,6 +17,14 @@ acceleration_scaling: 0.05
 # Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused. Example:
 # joint_limits_deg: {J1: [-150, 150], J5: [-120, 120]}
 joint_limits_deg: {}
+
+# Joints that can turn more than a full turn (position range wider than 360 deg in the URDF) and that range (deg). The IK can
+# return the angle of such a joint a full turn off (q +- 360) and the arm would spin once round to reach it: ik_node sends the
+# equivalent angle nearest to the current one (inside this range and joint_limits_deg). Joints not listed are sent as solved.
+wrap_joints_deg:
+  J1: [-185, 185]
+  J4: [-360, 360]
+  J6: [-360, 360]
 
 # Optional (defaults in control/ik_node.py): planning_time 5.0 s, planning_attempts 10, goal_tolerance 0.001 rad,
 # ik_timeout 2.0 s, busy_timeout 60.0 s

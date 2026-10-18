@@ -4,7 +4,7 @@
 # 485 x 330 at mid height, 500 x 345 at the rim (10 mm lip); floor top at z = 11.4 mm.
 bin:
   name: myeonghwa_box
-  mesh: ../../../assets/objects/myeonghwa_box_520x365x200mm.stl  # null = procedural box of size_m (same outer size)
+  mesh: ../../../assets/objects/stl/myeonghwa_box_520x365x200mm.stl  # null = procedural box of size_m (same outer size)
   units: mm                   # units of the STL
   size_m: [0.520, 0.365, 0.200]   # outer size (only used by the procedural box, mesh: null)
   wall_thickness_m: 0.01      # procedural box only

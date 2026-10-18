@@ -1,0 +1,152 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.2"
+    }
+    defaultPrim = "jegg2510n_original_fingers"
+    doc = """Generated from Composed Stage of root layer /tmp/tmp_ujpes14/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/usdex_jegg2510n_original_fingers/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/temp_jegg2510n_original_fingers/jegg2510n_original_fingers.usd
+
+
+Generated from Composed Stage of root layer /home/v/project/Simulation/assets/jegg2510n_original_fingers/urdf/jegg2510n_original_fingers/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "jegg2510n_original_fingers"
+{
+    over "Geometry"
+    {
+        over "flange"
+        {
+            over "gripper_mount" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsArticulationRootAPI", "NewtonArticulationRootAPI", "PhysicsMassAPI"]
+            )
+            {
+                bool newton:selfCollisionEnabled = 0
+                point3f physics:centerOfMass = (0.004, 0, 0)
+                float3 physics:diagonalInertia = (0.000058484893, 0.000058484893, 0.00011581167)
+                float physics:mass = 0.108573444
+                quatf physics:principalAxes = (-0.5, 0.5, 0.5, 0.5)
+
+                over "gripper_motor" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    point3f physics:centerOfMass = (1.2557538e-18, 0.00071278715, 0.04139688)
+                    float3 physics:diagonalInertia = (0.000096321775, 0.00020947603, 0.0002607788)
+                    float physics:mass = 0.33
+                    quatf physics:principalAxes = (0.7070571, -0.00837908, 0.7070571, 0.00837908)
+
+                    over "gripper_left" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        point3f physics:centerOfMass = (1.1387775e-9, 0.007946951, 0.16792868)
+                        float3 physics:diagonalInertia = (8.437761e-7, 0.00047267284, 0.00047304976)
+                        float physics:mass = 0.037009962
+                        quatf physics:principalAxes = (0.7069732, -0.013744826, 0.7069732, 0.0137450965)
+                    }
+
+                    over "gripper_right" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        point3f physics:centerOfMass = (1.1387807e-9, -0.007946951, 0.16792868)
+                        float3 physics:diagonalInertia = (8.437761e-7, 0.00047267284, 0.00047304976)
+                        float physics:mass = 0.037009962
+                        quatf physics:principalAxes = (0.7069732, 0.013744826, 0.7069732, -0.0137450965)
+                    }
+                }
+
+                over "cylinder_1" (
+                    prepend apiSchemas = ["NewtonCollisionAPI"]
+                )
+                {
+                }
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        def PhysicsPrismaticJoint "gripper_left_joint" (
+            prepend apiSchemas = ["PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:damping = 2
+            float drive:linear:physics:maxForce = 75
+            uniform token physics:axis = "Y"
+            custom rel physics:body0
+            prepend rel physics:body0 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount/gripper_motor>
+            custom rel physics:body1
+            prepend rel physics:body1 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount/gripper_motor/gripper_left>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 9.937786e-18, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 0.005
+            custom float urdf:dynamics:damping = 2
+            custom float urdf:dynamics:friction = 0.05
+            custom float urdf:limit:effort = 75
+            custom float urdf:limit:velocity = 0.0435
+        }
+
+        def PhysicsPrismaticJoint "gripper_right_joint" (
+            prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:damping = 2
+            float drive:linear:physics:maxForce = 75
+            rel newton:mimicJoint = </jegg2510n_original_fingers/Physics/gripper_left_joint>
+            uniform token physics:axis = "Y"
+            custom rel physics:body0
+            prepend rel physics:body0 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount/gripper_motor>
+            custom rel physics:body1
+            prepend rel physics:body1 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount/gripper_motor/gripper_right>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0, -1, 0, 0)
+            quatf physics:localRot1 = (0, -1, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 0.005
+            custom float urdf:dynamics:damping = 2
+            custom float urdf:dynamics:friction = 0.05
+            custom float urdf:limit:effort = 75
+            custom float urdf:limit:velocity = 0.0435
+        }
+
+        def PhysicsFixedJoint "flange_mount_joint"
+        {
+            custom rel physics:body0
+            prepend rel physics:body0 = </jegg2510n_original_fingers>
+            custom rel physics:body1
+            prepend rel physics:body1 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        def PhysicsFixedJoint "flange_to_gripper_motor"
+        {
+            custom rel physics:body0
+            prepend rel physics:body0 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount>
+            custom rel physics:body1
+            prepend rel physics:body1 = </jegg2510n_original_fingers/Geometry/flange/gripper_mount/gripper_motor>
+            point3f physics:localPos0 = (0.008, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, 0.70710677, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+}
+

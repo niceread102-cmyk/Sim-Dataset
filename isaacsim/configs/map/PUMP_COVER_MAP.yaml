@@ -1,0 +1,17 @@
+# The scene of the pump cover: the same as map.yaml (map, robot, platform, pallets), only the crates and the part differ.
+#   lab robot_sim.py map:=PUMP_COVER_MAP          ros2 launch robot.launch.py robot:=<robot> sequence:=pump_cover
+# Everything not written here is the one of map.yaml (defaults: below).
+defaults: [map]
+
+scene:
+  pallets:
+    crate:                         # the blue crates of the side plates are replaced by the box of configs/objects/bin.yaml (myeonghwa_box_520x365x200mm.stl)
+      usd: null
+      config: bin                  # its USD is made from the STL like the one of the bin
+      size_m: [0.520, 0.365, 0.200]  # outer x y z (the long side is x)
+      inner_size_m: [0.500, 0.345]   # usable floor x y
+      floor_z_m: 0.0114              # top of the floor above the bottom of the box
+      gap_m: 0.002                   # 3 x 0.365 + 2 gaps = 1.099 m: a layer fills the 1.1 m pallet
+    part: pump_cover_light         # configs/objects/pump_cover_light.yaml: pump_cover.stl (494 k triangles) cut to 33 k, the same size 191 x 109 x 14 mm
+    parts_per_crate: 6             # 6 lying flat cover 73 % of the floor; more are stacked on each other
+    layers: 6                      # 6 x 0.2 m: the stack is 1.32 m high (with the pallet)

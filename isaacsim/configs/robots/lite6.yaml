@@ -1,4 +1,4 @@
-# lab robot_sim.py robot:=lite6    (URDF: ../../../assets/lite6/urdf/lite6.urdf, MoveIt: ros2 launch bringup/lite6/launch/lite6.launch.py)
+# lab robot_sim.py robot:=lite6    (URDF: ../../../assets/robot/lite6/urdf/lite6.urdf, MoveIt: ros2 launch bringup/lite6/launch/lite6.launch.py)
 # Only the robot is here: the scene (bin, pile, basket, objects) is configs/map/map.yaml, the same for every robot.
 name: lite6
 gripper: none                     # no separate gripper URDF: the lite6 gripper is part of lite6.urdf (see gripper_joints)

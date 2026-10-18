@@ -14,7 +14,7 @@ Only files inside this Simulation folder are read:
 
 Preparation:
     source /opt/ros/jazzy/setup.bash
-    # Start the Isaac Sim side controller (/lite6_traj_controller) first in a separate terminal (robot: configs/robots/select_robot.yaml):
+    # Start the Isaac Sim side controller (/lite6_traj_controller) first in a separate terminal (robot: scene.robot of configs/map/map.yaml):
     #   conda activate sim && cd isaacsim && lab robot_sim.py robot:=lite6
 
 Run (from /home/v/project/Simulation):
@@ -40,7 +40,7 @@ BRINGUP_DIR = Path(__file__).resolve().parents[1]  # Simulation/bringup/lite6/
 SIM_DIR = BRINGUP_DIR.parents[1]                   # Simulation/
 CONFIG_DIR = BRINGUP_DIR / "config"
 RVIZ_FILE = BRINGUP_DIR / "rviz" / "demo.rviz"
-URDF_FILE = SIM_DIR / "assets" / "lite6" / "urdf" / "lite6.urdf"
+URDF_FILE = SIM_DIR / "assets" / "robot" / "lite6" / "urdf" / "lite6.urdf"
 IK_NODE = SIM_DIR / "control" / "ik_node.py"  # generic, the robot is in config/ik_node.yaml
 
 

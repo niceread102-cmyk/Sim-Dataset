@@ -1,0 +1,25 @@
+# robot_sequence.py for the side plate map (SIDE_PLATE_MAP): the task on this map, in the world coordinates of the map, the same for every robot.
+#   ros2 launch robot.launch.py robot:=<robot> sequence:=side_plate
+# What differs for one robot goes under `robots:` (key = the robot name, any key of this file, e.g. trajectory:).
+target: tcp                                # /target_pose is the TCP of the grip: paste the SECOND line robot_sim.py prints for a clicked part ("x y z roll pitch yaw standard|turn_over") into ee_6d.py;
+                                           # the word at its end is the state of the part (poses.place below). `object` would expect the FIRST line (the pose of the part) and work the state out itself
+poses:
+  place:                                     # where the part is let go of (TCP, tool pointing down), by the state of the part (found out from its pose)
+    standard:  [-0.612, -0.658, 1.061, 180, 0, 0]   # the plate (hub up) in the pocket of the right jaws of the laser marker (map.yaml machines), rotor at 0:
+    turn_over: [-0.412, -0.658, 0.990, 180, 0, 0]   #   x y = the centre of the 55.5 mm round pocket; z = the rim of the flange (z -10.5 .. -3.5 mm of the part) at the middle of the pocket (z 1.0385 .. 1.0685).
+                                                    #   turn_over = hub down, put on the attachment of the flipper (flipper_jig of the laser marker: ring, pin and two prongs at x -0.4123 y -0.6579): the pin goes into the bore,
+                                                    #   the prongs into the two windows of the flange. Fitted by testing the two meshes against each other: the tool yaw 0 (rpy 180 0 0) is right (+-0.5 deg), seated at z 0.9898
+  place_offset: 0.3                          # the arm first goes to the place pose raised by 0.3 m in z, then straight down 0.3 m to it (like approach + insert of a pick)
+
+trajectory:                                  # the way between home and place (world, TCP, tool down; place = the pose raised by place_offset): a straight line, no via waypoint.
+  place: line                                # If the line is not possible (out of reach, the arm would jump to another configuration) it falls back to a joint goal.
+
+robots:                                      # what differs for one robot (key = the robot name; any key of this file)
+  m20_35_18d_mhzl2_20d:
+    poses:
+      home: [0.061, -0.749, 1.538, 180, 0, 45]   # scan pose = home: the wrist camera (lens z 1.9 m, 0.74 m above the parts) looks straight down at the centre of a crate of the top layer:
+                                                 #   pallet 1, crate 2 (x 0.214 y -0.742 of scene.pallets; 25 gears, next to crate 5 with 150), its long side along the image x axis (yaw 45).
+                                                 #   From ee_6d.py's `lens 0.214 -0.742 1.9 225`; IK checked: J = 100 -15 -39 0 -67 35 deg. vision_pick.py takes its picture here.
+                                                 #   `ready` (the start pose of the robot) is the default home
+  # m20_35_18d_jegg2510n:
+  #   trajectory: {place: line, via: [[-0.5, -0.4, 1.4, 180, 0, 0]]}

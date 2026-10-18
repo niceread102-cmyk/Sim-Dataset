@@ -1,6 +1,6 @@
-# TM147-TM570_CAMRING-OIL_PUMP: made by make_object_config.py from assets/objects/TM147-TM570_CAMRING-OIL_PUMP.stl (mm).
+# TM147-TM570_CAMRING-OIL_PUMP: made by make_object_config.py from assets/objects/stl/TM147-TM570_CAMRING-OIL_PUMP.stl (mm).
 name: tm147_tm570_camring_oil_pump
-mesh: ../../../assets/objects/TM147-TM570_CAMRING-OIL_PUMP.stl   # 54.0 x 54.0 x 13.4 mm
+mesh: ../../../assets/objects/stl/TM147-TM570_CAMRING-OIL_PUMP.stl   # 54.0 x 54.0 x 13.4 mm
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
 mass_kg: 0.0916       # volume 11.7 cm^3 x 7.85 g/cm^3

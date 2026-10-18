@@ -16,7 +16,7 @@ Only files inside this Simulation folder are read (neither fanuc_ws nor colcon b
 Preparation:
     source /opt/ros/jazzy/setup.bash
     # Start the Isaac Sim side controller (/r2000ic_165f_traj_controller) first in a separate terminal
-    # (robot: configs/robots/select_robot.yaml):
+    # (robot: scene.robot of configs/map/map.yaml):
     #   conda activate sim && cd isaacsim && lab robot_sim.py
 
 Run (from /home/v/project/Simulation):
@@ -42,7 +42,7 @@ BRINGUP_DIR = Path(__file__).resolve().parents[1]  # Simulation/bringup/r2000ic_
 SIM_DIR = BRINGUP_DIR.parents[1]                   # Simulation/
 CONFIG_DIR = BRINGUP_DIR / "config"
 RVIZ_FILE = BRINGUP_DIR / "rviz" / "demo.rviz"
-URDF_FILE = SIM_DIR / "assets" / "r2000ic_165f" / "urdf" / "r2000ic_165f.urdf"
+URDF_FILE = SIM_DIR / "assets" / "robot" / "r2000ic_165f" / "urdf" / "r2000ic_165f.urdf"
 IK_NODE = SIM_DIR / "control" / "ik_node.py"  # generic, the robot is in config/ik_node.yaml
 
 

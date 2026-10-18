@@ -1,0 +1,429 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.2"
+    }
+    doc = """Generated from Composed Stage of root layer /tmp/tmp_ujpes14/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/usdex_jegg2510n_original_fingers/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/temp_jegg2510n_original_fingers/jegg2510n_original_fingers.usd
+
+
+Generated from Composed Stage of root layer /home/v/project/Simulation/assets/jegg2510n_original_fingers/urdf/jegg2510n_original_fingers/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Scope "Instances"
+{
+    def Xform "gripper_motor_visual_0" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_visual_0>
+    )
+    {
+        over "gripper_motor_visual_0" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/gripper_motor_visual_0/VisualMaterials/body_silver>
+            custom string urdf:name = "gripper_motor_visual_0"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "body_silver" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/body_silver>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "gripper_motor_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_visual_1>
+    )
+    {
+        over "gripper_motor_visual_1" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/gripper_motor_visual_1/VisualMaterials/dark>
+            custom string urdf:name = "gripper_motor_visual_1"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "dark" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/dark>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "gripper_motor_visual_2" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_visual_2>
+    )
+    {
+        over "gripper_motor_visual_2" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/gripper_motor_visual_2/VisualMaterials/blue>
+            custom string urdf:name = "gripper_motor_visual_2"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "blue" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/blue>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "gripper_motor_visual_3" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_visual_3>
+    )
+    {
+        over "gripper_motor_visual_3" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/gripper_motor_visual_3/VisualMaterials/dark>
+            custom string urdf:name = "gripper_motor_visual_3"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "dark" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/dark>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "left_slider_m" (
+        prepend references = @./geometries.usd@</Geometries/left_slider_m>
+    )
+    {
+        over "left_slider_m" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/left_slider_m/VisualMaterials/left_slider_m_material>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "left_slider_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_slider_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "left_finger_straight_m" (
+        prepend references = @./geometries.usd@</Geometries/left_finger_straight_m>
+    )
+    {
+        over "left_finger_straight_m" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/left_finger_straight_m/VisualMaterials/left_finger_plus300_m_material>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "left_finger_plus300_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_finger_plus300_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "left_finger_mount_spacer_visual" (
+        prepend references = @./geometries.usd@</Geometries/left_finger_mount_spacer_visual>
+    )
+    {
+        over "left_finger_mount_spacer_visual" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/left_finger_mount_spacer_visual/VisualMaterials/left_finger_plus300_m_material>
+            custom string urdf:name = "left_finger_mount_spacer_visual"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "left_finger_plus300_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_finger_plus300_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "left_finger_mount_spacer_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/left_finger_mount_spacer_visual>
+    )
+    {
+        over "left_finger_mount_spacer_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "left_slider_collision_m" (
+        prepend references = @./geometries.usd@</Geometries/left_slider_collision_m>
+    )
+    {
+        over "left_slider_collision_m" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "left_uploaded_finger_collision_0" (
+        prepend references = @./geometries.usd@</Geometries/left_uploaded_finger_collision_0>
+    )
+    {
+        over "left_uploaded_finger_collision_0" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "left_uploaded_finger_collision_1" (
+        prepend references = @./geometries.usd@</Geometries/left_uploaded_finger_collision_1>
+    )
+    {
+        over "left_uploaded_finger_collision_1" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "left_uploaded_finger_collision_2" (
+        prepend references = @./geometries.usd@</Geometries/left_uploaded_finger_collision_2>
+    )
+    {
+        over "left_uploaded_finger_collision_2" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "right_slider_m" (
+        prepend references = @./geometries.usd@</Geometries/right_slider_m>
+    )
+    {
+        over "right_slider_m" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_slider_m/VisualMaterials/right_slider_m_material>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "right_slider_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_slider_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_finger_straight_m" (
+        prepend references = @./geometries.usd@</Geometries/right_finger_straight_m>
+    )
+    {
+        over "right_finger_straight_m" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_finger_straight_m/VisualMaterials/right_finger_plus300_m_material>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "right_finger_plus300_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_finger_plus300_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_finger_mount_spacer_visual" (
+        prepend references = @./geometries.usd@</Geometries/right_finger_mount_spacer_visual>
+    )
+    {
+        over "right_finger_mount_spacer_visual" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/right_finger_mount_spacer_visual/VisualMaterials/right_finger_plus300_m_material>
+            custom string urdf:name = "right_finger_mount_spacer_visual"
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "right_finger_plus300_m_material" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/left_finger_plus300_m_material>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "right_finger_mount_spacer_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/right_finger_mount_spacer_visual>
+    )
+    {
+        over "right_finger_mount_spacer_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "right_slider_collision_m" (
+        prepend references = @./geometries.usd@</Geometries/right_slider_collision_m>
+    )
+    {
+        over "right_slider_collision_m" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "right_uploaded_finger_collision_0" (
+        prepend references = @./geometries.usd@</Geometries/right_uploaded_finger_collision_0>
+    )
+    {
+        over "right_uploaded_finger_collision_0" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "right_uploaded_finger_collision_1" (
+        prepend references = @./geometries.usd@</Geometries/right_uploaded_finger_collision_1>
+    )
+    {
+        over "right_uploaded_finger_collision_1" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "right_uploaded_finger_collision_2" (
+        prepend references = @./geometries.usd@</Geometries/right_uploaded_finger_collision_2>
+    )
+    {
+        over "right_uploaded_finger_collision_2" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "gripper_motor_collision_0" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_collision_0>
+    )
+    {
+        over "gripper_motor_collision_0" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "gripper_motor_collision_1" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_collision_1>
+    )
+    {
+        over "gripper_motor_collision_1" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "gripper_motor_collision_2" (
+        prepend references = @./geometries.usd@</Geometries/gripper_motor_collision_2>
+    )
+    {
+        over "gripper_motor_collision_2" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+}
+

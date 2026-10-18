@@ -1,21 +1,42 @@
-# Copied from ur_moveit_config/config/joint_limits.yaml (Universal_Robots_ROS2_Driver). The velocity / position limits come from
-# the URDF (assets/ur5e/urdf/ur5e.urdf); MoveIt needs the accelerations for time parametrization (TOTG), they are conservative.
+# ur5e: written from the URDF by isaacsim/make_robot_config.py at every run: change the URDF (or --accel-factor), not this file.
+# Velocities are the URDF velocity limits; MoveIt's time-optimal trajectory generation needs an acceleration:
+# 2 x the velocity. With has_acceleration_limits: false it throws an "undefined" error and nothing can be executed.
+# Position and effort limits are the URDF's (MoveIt reads position from there; the sim drive force limit is the effort), listed
+# here to read: position deg (m), velocity rad/s (m/s), effort N*m (N):
+#   shoulder_pan_joint: position ±360, velocity 3.14159, effort 150
+#   shoulder_lift_joint: position ±360, velocity 3.14159, effort 150
+#   elbow_joint: position ±180, velocity 3.14159, effort 150
+#   wrist_1_joint: position ±360, velocity 3.14159, effort 28
+#   wrist_2_joint: position ±360, velocity 3.14159, effort 28
+#   wrist_3_joint: position ±360, velocity 3.14159, effort 28
 joint_limits:
   shoulder_pan_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586
   shoulder_lift_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586
   elbow_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586
   wrist_1_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586
   wrist_2_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586
   wrist_3_joint:
+    has_velocity_limits: true
+    max_velocity: 3.141592653589793
     has_acceleration_limits: true
-    max_acceleration: 5.0
+    max_acceleration: 6.283185307179586

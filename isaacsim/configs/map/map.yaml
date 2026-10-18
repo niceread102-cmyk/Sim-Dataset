@@ -1,31 +1,73 @@
 # Bin-picking dataset experiment. Override any leaf on the CLI:
 # python scripts/generate.py --config configs/default.yaml run.num_envs=32 loading.mode=layers
 # Presets (camera / bin) are merged first; keys below override them.
-defaults: [../cameras/phoxi_1952x1460, ../parts/bin]  # phoxi_1952x1460 = the real colour photos (size, K, lens),
+defaults: [../cameras/phoxi_1952x1460, ../objects/bin]  # phoxi_1952x1460 = the real colour photos (size, K, lens),
                               # phoxi_paj042 = the PAJ-042 scanner's calibrated K (2472 x 2064), phoxi_m = datasheet guess;
-                              # parts/bin = the real blue bin (STL, size, colour)
+                              # objects/bin = the real blue bin (STL, size, colour)
 
 scene:                        # robot_sim.py (lab robot_sim.py): what stands around the robot, the same for every robot
-                              # (robot: robots/select_robot.yaml). World = robot base frame (m): the positions have to be inside the
+                              # (robot: below). World = Isaac Sim world (m), the robot stands at pos_m / rpy_deg of its yaml: the positions have to be inside the
                               # reach of the selected robot (m20_35_18d ~2 m, ur5e ~0.85 m). The bin itself (mesh, size, colour) is
-                              # the `bin:` section below and the pile is placed with its `loading:` settings. The other sections
+                              # the `bin:` section below (commented out) and the pile is placed with its `loading:` settings. The other sections
                               # of this file are for the data collection and are not used by robot_sim.py
-  objects: []                 # single rigid parts, configs/parts/<part>.yaml; pos_m = part center (world, m), e.g.
+  robot: m20_35_18d_mhzl2_20d  # the robot started when none is named: `lab robot_sim.py`, `ros2 launch robot.launch.py`, control/robot_sequence.py
+                              # (robot:=ur5e on the command line wins). Robots = the files of configs/robots/ (made by make_robot_config.py)
+  map: SIDE_PLATE_MAP         # (SIDE_PLATE_MAP_light = the old light copy, no RobotStand) an environment made in the Isaac Sim GUI: a USD of assets/map/ (name or path); null = none.
+                              # On the command line: `lab robot_sim.py map:=SIDE_PLATE_MAP_light` (wins), `map:=none`. Its top-level prims (not the render
+                              # settings / viewport cameras / light rig its stage saved) go to /World/map; the colliders set in the GUI are used as they are
+  pallets:                    # crates of parts stacked on the pallets of the map (SIDE_PLATE_MAP): remove this section = none (binsim/pallets.py)
+    seed: random              # random = a new random arrangement on every start (printed), a number = the same one every time
+    items:                    # the pallets that get crates: pos_m = centre of the deck at deck top height, yaw_deg (measured from the pallet mesh of
+      - {pos_m: [0.6582, 0.8168, 0.12], yaw_deg: 45}     # the map: 1.1 x 1.1 m, two of them on the +x side turned by 45 degrees)
+      - {pos_m: [0.6582, -0.8168, 0.12], yaw_deg: 45}
+    crate:
+      usd: ../../../assets/objects/usd/SIDE_PLATE_BOX_520x365x200mm.usd    # relative to this file: SIDE_PLATE_BOX.usd (made in the GUI, perforated crate) turned and stretched to 520 x 365 x 200 mm
+      size_m: [0.520, 0.365, 0.200]  # outer x y z, the long side is x
+      inner_size_m: [0.4516, 0.3042] # usable floor x y (the old 0.330 x 0.200 floor stretched with the crate)
+      floor_z_m: 0.0149              # top of the crate floor (old 0.0078 x 1.905)
+      gap_m: 0.002                   # between crates of a layer: 3 x 0.365 + 2 gaps = 1.099 m, a layer fills the 1.1 m pallet
+    part: side_plate          # configs/objects/<part>.yaml, dropped in at random place / yaw, lying flat (either side up)
+    parts_per_crate: 10
+    layers: 6                 # crates on top of each other per pallet
+    grids: [[2, 3]]           # crates per layer along the pallet's x y: one of these, the crates turned so that the block is compact (a single grid: every layer the same, no zigzag)
+    grid_mode: pallet         # layer = a random grid for every layer | pallet = one for each pallet | alternate = the grids in turn
+    dynamic_layers: 1         # parts of the top N layers are free bodies (gravity, the robot picks them); the ones below are fixed. 6 = every layer = 720 free parts: very slow (the crates stay fixed)
+  machines:                   # articulated machines (URDF assets/machine/<name>/urdf/<name>.urdf) with joints that move: remove this section = none
+    - name: laser_marker      # fitted to the STL copy of it in the map (SIDE_PLATE_MAP.usd, /SIDE_PLATE_MAP/LaserMarker): the URDF is turned by -90 deg about z (its long y axis is x there)
+      pos_m: [-1.2223, -0.6579, 0.0]   # the base_link of the URDF in the world (m); the meshes match the STL to 0.2 mm
+      rpy_deg: [0, 0, -90]
+      replaces: SIDE_PLATE_MAP/LaserMarker   # prim of the map USD (below /World/map) that is switched off, because the machine is the same thing
+      speed: 1.0              # max joint speed = speed x URDF velocity limit (flip joints 0.6 rad/s, jaws 0.03 m/s)
+      collision_decomposition: ["left_gripper_.*", "right_gripper_.*", "carrier_.*", "flipper_jig"]   # link-name regexes: the jaws (collision = their STL, the pocket for the plate), the carriers and the attachment of the flipper are convexDecomposition, not a hull (a hull fills the pocket / the ring)
+      carriers:               # the five carriers of the belt (cut out of base_link.stl) move in steps, stop-and-go, and run round: leaving at the -y end, back at the +y end
+        joints: [carrier_0_joint, carrier_1_joint, carrier_2_joint, carrier_3_joint, carrier_4_joint]   # in the order of slots_m
+        slots_m: [-0.83, -0.47, -0.11, 0.25, 0.61]   # where each carrier stands at rest, y of the URDF (-0.83, -0.47 and 0.61 are under the jaws): 0.36 m apart
+        window_m: [-1.01, 0.79]                      # the loop along y of the URDF: 5 x 0.36 = 1.8 m. Past -1.01 a carrier reappears at 0.79
+        speed_mps: 0.1                               # m/s while it moves
+        # topic: /laser_marker/carriers              # (default) std_msgs/Int32: n > 0 = advance n pitches (0.36 m each), 0 = stop. /laser_marker/carriers/moving (Bool): True while it moves
+      joint_pos:              # start pose (rad / m), default 0: the jaws start open (upper limit 0.01 m: the pocket of 55.5 mm becomes 75.5 mm, a plate of 55.56 mm goes in), the flipper rotor at 90 deg (rest, out of the way: isaacsim/machine/laser_marker.py), the left rotor at 0
+        right_flip_joint: 1.5708
+        left_gripper_1_jaw_a_joint: 0.01
+        left_gripper_1_jaw_b_joint: 0.01
+        left_gripper_2_jaw_a_joint: 0.01
+        left_gripper_2_jaw_b_joint: 0.01
+        right_gripper_jaw_a_joint: 0.01
+        right_gripper_jaw_b_joint: 0.01
+      # ROS 2: ros2 topic pub --once /laser_marker/joint_command sensor_msgs/msg/JointState "{name: [left_flip_joint], position: [3.14]}"   (state: /laser_marker/joint_states)
+  objects: []                 # single rigid parts, configs/objects/<part>.yaml; pos_m = part center (world, m), e.g.
                               # - {part: side_plate, pos_m: [1.2, 0.0, 0.02], rpy_deg: [0, 0, 0]}
-  bin:                        # picking test: the bin + a pile dropped into it (remove or leave empty = no bin)
-    pos_m: [1.0, 0.0, 0.0]    # bin bottom centre (world, m)
-    rpy_deg: [0, 0, 0]
-    pile: {part: side_plate, count: 100, seed: random}   # dropped in like the dataset (random positions, uniform orientation)
-                              # seed: random = a new random pile on every start (the seed is printed: use it as a number to get
-                              # the same pile again), a number = always the same pile
-  basket:                     # where the part is released: an open box (floor + 4 walls, kinematic), world coordinates
-    pos_m: [0.3, 0.5, 0.0]    # basket bottom centre (m). configs/sequence/robot_sequence.yaml (basket.map_config) reads pos_m, size_m and
-                              # wall_thickness_m from here: its place pose must be above the basket and the gripper goes down to
-                              # the floor of this basket before it lets go
-    rpy_deg: [0, 0, 0]
-    size_m: [0.40, 0.30, 0.15]  # outer size [x, y, z]
-    wall_thickness_m: 0.01      # floor and walls
-    color: [0.80, 0.50, 0.20]   # orange-brown
+  # bin:                        # [off by default: uncomment to use] picking test: the bin + a pile dropped into it (remove or leave empty = no bin)
+  #   pos_m: [1.0, 0.0, 0.0]    # bin bottom centre (world, m)
+  #   rpy_deg: [0, 0, 0]
+  #   pile: {part: side_plate, count: 100, seed: random}   # dropped in like the dataset (random positions, uniform orientation)
+  #                             # seed: random = a new random pile on every start (the seed is printed: use it as a number to get
+  #                             # the same pile again), a number = always the same pile
+  # basket:                     # [off by default: uncomment to use] an open box (floor + 4 walls, kinematic), world coordinates
+  #   pos_m: [0.3, 0.5, 0.0]    # basket bottom centre (m). Only an object of the scene: the sequence of the robot does not read it
+  #   rpy_deg: [0, 0, 0]
+  #   size_m: [0.40, 0.30, 0.15]  # outer size [x, y, z]
+  #   wall_thickness_m: 0.01      # floor and walls
+  #   color: [0.80, 0.50, 0.20]   # orange-brown
 
 camera:                       # overrides of the camera preset above (configs/cameras/phoxi_m.yaml)
   image_mode: rgb             # rgb = colour images (rgb/*.png) | gray = PhoXi monochrome texture
@@ -80,7 +122,7 @@ run:
 assets:
   cache_dir: ../../assets_cache  # converted STL/USD/PLY (keyed by source hash + settings)
 
-bin:                          # mesh / size / colour: configs/parts/bin.yaml (keys set here would override it)
+bin:                          # mesh / size / colour: configs/objects/bin.yaml (keys set here would override it)
   pos_m: [0.0, 0.0, 0.0]      # bin frame origin (bottom center) in the env frame
   rpy_deg: [0, 0, 0]
   friction: 0.5
@@ -90,7 +132,7 @@ floor:                        # what the bin stands on (generate_isaacsim.py)
                               # which came out light grey, brighter than the metal)
 
 parts:                        # one or more part types; each scene samples a count per type
-  - config: ../parts/support_input_shaft.yaml
+  - config: ../objects/support_input_shaft.yaml
     count: [280, 300]
 
 loading:

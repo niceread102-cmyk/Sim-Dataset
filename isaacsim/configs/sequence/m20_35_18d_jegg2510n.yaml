@@ -1,4 +1,4 @@
-# robot_sequence.py for m20_35_18d_jegg2510n (the same M20 setup as m20_35_18d.yaml): what differs from robot_sequence.yaml (poses of the M20 setup, TCP [x, y, z, roll, pitch, yaw] in base_link).
-poses:
-  home: [1.0, 0.0, 1.0, 180, 0, 0]    # initialization pose = home pose, in front of the robot and high (the TCP of the ready pose is further out)
-  place: [0.3, 0.5, 1.0, 180, 0, 0]   # above the basket (x y inside the basket walls)
+# robot_sequence.py for m20_35_18d_jegg2510n (the same M20 setup as m20_35_18d.yaml): what differs from robot_sequence.yaml (poses of the M20 setup, TCP [x, y, z, roll, pitch, yaw] in the world frame, see robot_sequence.yaml).
+robot: m20_35_18d_jegg2510n
+extends: side_plate                       # the task of the map (where to place, by the state of the part); below only what is special for this robot
+# trajectory: only what differs from side_plate for this robot (approach / home / place: joint | line, via: [...]); an own `via` replaces the one of side_plate

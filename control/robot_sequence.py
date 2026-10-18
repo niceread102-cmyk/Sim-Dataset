@@ -1,33 +1,48 @@
-"""Pick & place sequence control for any robot: /target_pose (Pose, TCP target in base_link) -> MoveIt2 /move_action + /gripper/command
+"""Pick & place sequence control for any robot: /target_pose (Pose, TCP target in the world frame of ik_node.yaml base_frame) -> MoveIt2 /move_action + /gripper/command
 
-    python3 control/robot_sequence.py [--robot ur5e]          (default: the robot of isaacsim/configs/robots/select_robot.yaml)
+    python3 control/robot_sequence.py --sequence m20_35_18d_jegg2510n [--robot m20_35_18d_jegg2510n]
+    ros2 launch robot.launch.py robot:=m20_35_18d_jegg2510n sequence:=m20_35_18d_jegg2510n       (without sequence:= only ik_node runs)
 
-The task parameters (approach distance, delays, tolerances, topics, ...) are in isaacsim/configs/sequence/robot_sequence.yaml, the
-same for every robot; isaacsim/configs/sequence/<robot>.yaml (optional) overrides what differs for one robot. Everything about the
-robot comes from its own files: planning group, arm joints, base frame, end frame, TCP length and IK seed from
-bringup/<robot>/config/ik_node.yaml (made by isaacsim/make_robot_config.py), the gripper topic and joint from
-isaacsim/configs/robots/<robot>.yaml and the gripper URDF (a robot without a gripper skips the gripper steps), the basket from
-isaacsim/configs/map/map.yaml. The home pose is the TCP of the ready pose (ik seed) and the place pose is above the basket,
-unless poses.home / poses.place give a pose.
+A sequence is one yaml of isaacsim/configs/sequence/<name>.yaml: a task on a map (where the part is let go of, the approach distance, ...,
+in the world coordinates of the map). `robots:` in it holds what differs for one robot (key = robot name; any key of the yaml, e.g.
+trajectory: the way the arm travels between the poses), `robot:` (optional) limits it to one robot, `extends: <sequence>` builds on another
+sequence (e.g. a robot's own yaml with its trajectory on top of the task of the map). Everything else (tolerances,
+topics, ...) is the same for every task and comes from isaacsim/configs/sequence/robot_sequence.yaml. Everything about the
+robot comes from its own files: planning group, arm joints, base frame, end frame and TCP length from
+bringup/<robot>/config/ik_node.yaml (made by isaacsim/make_robot_config.py), the start pose (joint_pos), the gripper topic and joint from
+isaacsim/configs/robots/<robot>.yaml and the gripper URDF (a robot without a gripper skips the gripper steps). Nothing of the scene
+(map, pallets, boxes, basket) is read: the sequence belongs to the robot alone. The home pose is the TCP of the start pose of the robot
+(joint_pos of its yaml; ik_seed_deg of ik_node.yaml if it has none), unless poses.home gives a pose. poses.place (default: the home pose) is
+where the part is let go of: one pose, or one pose per state of the part (`standard`, `turn_over`: the word after the pose in ee_6d.py,
+published on topics.place_variant; with `target: object` the sequence decides it itself); poses.release (optional) is a pose below it that the gripper goes down to first.
+poses.place_height (optional) does that for every place pose without a release pose: the arm first travels to the x y of the place pose at that height
+(`home` = the height of the home pose, or a z in m), then goes straight down to the z of the place pose to let go of the part.
+When a sequence is done (the robot is at home again) the state of the part it has placed (standard | turn_over) is published on topics.sequence_done
+(std_msgs/String): isaacsim/machine/laser_marker.py runs the laser marker from it.
+The state of the part comes from the simulation: robot_sim.py publishes the clicked part on topics.part_turned_over (std_msgs/Bool, True = turned over, latched); the word
+after the pose in ee_6d.py (topics.place_variant) is only used while nothing has been clicked.
+poses.place_offset (optional, instead of place_height) is the same with a height relative to the place pose, like the approach of a pick: the arm first goes to the place
+pose raised by that many m in z, then straight down by the same distance (the `lower` line), lets go of the part and comes back up.
 
 At start (once move_group is up) the gripper is closed and the robot moves to the home pose to initialize, then it
 waits for /target_pose. On /target_pose it moves in the order below and ends at the home pose again:
 
-    close the gripper (a cancelled sequence may have left it open) -> approach -> insert (after delays.descend) -> open the gripper (after delays.open)
-    -> rise back to the approach pose (after delays.rise) -> home pose -> place pose (above the basket)
-    -> lower into the basket (down to basket.release_height above its floor) -> close the gripper (lets go of the part)
-    -> lift back to the place pose (after delays.gripper_wait) -> home pose
+    close the gripper (a cancelled sequence may have left it open) -> approach -> insert -> open the gripper
+    -> rise back to the approach pose -> home pose -> place pose (unless it is the home pose)
+    -> [lower to poses.release] -> close the gripper (lets go of the part)
+    -> [lift back to the place pose] -> home pose
 
-The basket is the one of the Isaac Sim scene: basket.map_config points at the map (isaacsim/configs/map/map.yaml) whose `scene: basket:` section creates it.
-Its position and wall thickness give the height of its floor, and poses.place has to be above it (checked at start).
-
-The moves along the tool axis (insert / rise at the target, lower / lift in the basket) are straight lines: MoveIt's
+The moves along the tool axis (insert / rise at the target, lower / lift to poses.release) are straight lines: MoveIt's
 /compute_cartesian_path solves the IK every line.max_step along the line from where the arm is, and /execute_trajectory
 runs it. A joint goal would interpolate the joints, and the tool would follow a slight curve. If less than
 line.min_fraction of a line can be computed (out of reach, the arm would jump to another configuration), the step falls
 back to a joint goal (with a warning).
 
-The other moves (approach, home, place) are joint goals solved by /compute_ik with a seed (ik.seed for the first step of a
+The way the arm travels between the poses is a property of the robot (reach, joint limits, mounting): `trajectory:` of its sequence
+yaml says for every travel move (approach, home, via, place) whether the tool goes along a straight line (`line`, with the joint-space
+fallback below) or the joints go straight to the goal (`joint`), and `via:` lists TCP poses the arm passes on its way from the home pose to
+the place pose (and back), e.g. up to a safe height first, so that the path does not swing through the work area.
+The other moves (approach, home, place) are by default joint goals solved by /compute_ik with a seed (the start pose of the robot for the first step of a
 sequence, the end of the previous step after that). A plain pose goal lets MoveIt pick any IK solution, and a pose like
 the home pose has two very different ones (natural "L" shape and a folded "Z" shape of the arm); the seeded IK always takes
 the one nearest to the seed. That only holds for a seed that is near the target: a joint-space fallback of a long line
@@ -36,27 +51,31 @@ The approach pose is just as far from the ready pose (about 1 m lower, the tool 
 from there returned a different, folded arm (elbow over the top, base turned the wrong way) on different calls. So the
 approach is solved the same way: IK-only steps from the home pose, line.ik_step m and line.ik_angle_step deg apart.
 
-The delays start when the real state in /joint_states says the previous action is finished (the arm has stopped after
-a move, the gripper joint has reached its position or stopped short of it because the part blocks the jaws), not when
-MoveIt reports success. The log shows how long that took ("arm stopped", "gripper done") and where the gripper stopped.
+Nothing is timed: a step starts when robot_sim.py has answered the one before. A move ends with the result of the trajectory
+action (succeeded = the arm is at the goal and at rest, aborted = it stopped short of it, e.g. blocked), a gripper command with
+the answer on <gripper topic>/result (std_msgs/String: `reached` = the jaws are at the commanded position, `blocked` = they stopped
+short of it, e.g. pressing against the part: both mean the gripper is done). Both limits count physics frames in robot_sim.py, so a slow
+simulation changes nothing.
 
 The first move (to the home pose) waits until move_group, /compute_ik and /joint_states are up and is tried again if
 move_group rejects it right after launch (startup.retries). Any other move that fails (TIMED_OUT, CONTROL_FAILED, ...)
-is tried again once the arm has stopped (motion.retries; a straight line is computed again from where the arm is) before
-the sequence is cancelled. MoveIt itself has no time limit
-(execution duration monitoring is off in the bringup config): a move that has not finished after motion.timeout (e.g.
-move_group died) is cancelled here and stops the sequence.
+is tried again (motion.retries; a straight line is computed again from where the arm is) before the sequence is cancelled.
+When the sequence is cancelled (the arm is stuck, e.g. the gripper or the extension against a crate wall: MoveIt knows no crates) the arm goes back to the
+home pose by itself (motion.recover_home, default on) and is ready for the next target; /sequence_done then says `failed` instead of the state of the part.
+MoveIt itself has no time limit (execution duration monitoring is off in the bringup config): only a move that has not finished
+after motion.timeout (move_group died) is cancelled here by a watchdog and stops the sequence.
 
-Target value: send the rpy that compute_grasp_tcp_pose.py converted from the object orientation to a TCP orientation
-with ee_6d.py (x y z roll pitch yaw).
+Target value (ee_6d.py: x y z roll pitch yaw): with `target: tcp` (default) the pose of the TCP, i.e. the rpy that
+compute_grasp_tcp_pose.py converted from the object orientation to a TCP orientation. With `target: object` the pose of the object itself
+(the numbers robot_sim.py prints when you click a part): the sequence turns it into the TCP pose with compute_grasp_tcp_pose.py and
+finds out whether the part is upside down (turn_over) or not (standard), which picks the place pose of poses.place.
 It receives the same /target_pose as ik_node.py, so the two must not run together
 (sequence:=true of the launch leaves ik_node out and starts this node).
 """
 import argparse
 import math
-import time
+import re
 import xml.etree.ElementTree as ET
-from collections import deque
 from pathlib import Path
 
 import rclpy
@@ -69,30 +88,30 @@ from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.srv import GetCartesianPath, GetPositionFK, GetPositionIK
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, Float64, String
 from scipy.spatial.transform import Rotation
+
+import compute_grasp_tcp_pose as grasp    # object pose -> the TCP that grips it, and whether the object is upside down
 
 SIM_DIR = Path(__file__).resolve().parents[1]
 ISAAC_DIR = SIM_DIR / 'isaacsim'
 CONFIG_FILE = ISAAC_DIR / 'configs' / 'sequence' / 'robot_sequence.yaml'   # the task, the same for every robot
 ROBOTS_DIR = ISAAC_DIR / 'configs' / 'robots'
-SELECT_FILE = ROBOTS_DIR / 'select_robot.yaml'
+MAP_FILE = ISAAC_DIR / 'configs' / 'map' / 'map.yaml'
 
 # Keys of the merged config (checked by load_config). robot, ik.seed, the gripper and the poses are filled in from the files of the robot
 REQUIRED_KEYS = {
     'robot':     ['planning_group', 'arm_joints', 'base_link', 'tip_link', 'tool_axis', 'tcp_length'],
     'poses':     ['home', 'place'],
     'approach':  ['distance'],
-    'basket':    ['map_config', 'release_height'],
     'line':      ['service', 'action', 'max_step', 'revolute_jump_threshold', 'min_fraction', 'ik_step', 'ik_angle_step'],
     'ik':        ['service', 'seed', 'timeout', 'retry_timeout', 'avoid_collisions'],
-    'delays':    ['descend', 'open', 'rise', 'gripper_wait'],
     'startup':   ['poll', 'retries'],
-    'settle':    ['topic', 'arm_window', 'arm_tolerance', 'gripper_tolerance', 'gripper_grace', 'gripper_window', 'timeout'],
     'tolerance': ['joint', 'waypoint_position'],
     'motion':    ['velocity_scaling', 'acceleration_scaling', 'planning_time', 'planning_attempts', 'retries', 'timeout'],
     'gripper':   ['topic', 'open', 'close', 'enabled'],
-    'topics':    ['target_pose', 'move_action'],
+    'topics':    ['target_pose', 'move_action', 'joint_states'],
 }
 
 ERROR_NAMES = {v: k for k, v in vars(MoveItErrorCodes).items() if k.isupper() and isinstance(v, int)}
@@ -106,10 +125,10 @@ def deep_merge(base, over):
 
 
 def robot_name(choice=None):
-    """The robot of the sequence: --robot, else `robot:` of select_robot.yaml (the one `lab robot_sim.py` starts)."""
-    name = choice or str((yaml.safe_load(open(SELECT_FILE)) or {}).get('robot') or '')
+    """The robot of the sequence: --robot, else `scene.robot` of map.yaml (the one `lab robot_sim.py` starts)."""
+    name = choice or str(((yaml.safe_load(open(MAP_FILE)) or {}).get('scene') or {}).get('robot') or '')
     if not name:
-        raise ValueError(f'no robot: pass --robot <name> or set `robot:` in {SELECT_FILE}')
+        raise ValueError(f'no robot: pass --robot <name> or set `scene.robot` in {MAP_FILE}')
     return name
 
 
@@ -120,10 +139,10 @@ def gripper_joint(robot, robot_cfg):
     names = list(robot_cfg.get('gripper_joints') or [])
     gripper = str(robot_cfg.get('gripper') or 'none')
     if gripper.lower() not in ('none', 'null'):
-        urdf = SIM_DIR / 'assets' / gripper / 'urdf' / f'{gripper}.urdf'
-    elif names:                                      # assets/<robot>/urdf/<robot>.urdf, or <robot>.urdf in another assets/*/urdf/
-        urdf = SIM_DIR / 'assets' / robot / 'urdf' / f'{robot}.urdf'
-        urdf = urdf if urdf.is_file() else next(iter(sorted((SIM_DIR / 'assets').glob(f'*/urdf/{robot}.urdf'))), urdf)
+        urdf = SIM_DIR / 'assets' / 'grippper' / gripper / 'urdf' / f'{gripper}.urdf'
+    elif names:                                      # assets/robot/<robot>/urdf/<robot>.urdf, or <robot>.urdf in another assets/robot/*/urdf/
+        urdf = SIM_DIR / 'assets' / 'robot' / robot / 'urdf' / f'{robot}.urdf'
+        urdf = urdf if urdf.is_file() else next(iter(sorted((SIM_DIR / 'assets' / 'robot').glob(f'*/urdf/{robot}.urdf'))), urdf)
     else:
         return None
     joints = {j.get('name'): j for j in ET.parse(urdf).getroot().findall('joint') if j.get('type') in ('revolute', 'continuous', 'prismatic')}
@@ -134,16 +153,41 @@ def gripper_joint(robot, robot_cfg):
     return names[0], float(lim.get('lower', 0.0)), float(lim.get('upper', 0.0))
 
 
-def load_config(path=CONFIG_FILE, robot=None):
+def sequence_names(folder=CONFIG_FILE.parent):
+    return sorted(f.stem for f in Path(folder).glob('*.yaml') if f.name != CONFIG_FILE.name)
+
+
+def load_config(path=CONFIG_FILE, robot=None, sequence=None):
     """The task parameters (+ the overrides of the robot) with everything about the robot filled in from its own files. Raises
-    a clear error if a key is missing, the seed does not match the joints or poses.place is not above the basket. Adds
-    basket.floor_z (top of the basket floor, m, from the basket of the Isaac Sim scene)"""
-    robot = robot_name(robot)
+    a clear error if a key is missing or the seed does not match the joints. Only the robot's own files are read, nothing of the scene."""
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    own = Path(path).parent / f'{robot}.yaml'                              # optional: what differs for this robot
+    own = Path(path).parent / f'{sequence or robot_name(robot)}.yaml'      # what differs for this robot (optional when only the robot is named)
+    if sequence and not own.is_file():
+        raise ValueError(f'sequence {sequence!r} not found: {own} (sequences: {", ".join(sequence_names(own.parent)) or "-"})')
+    declared = None
     if own.is_file():
-        cfg = deep_merge(cfg, yaml.safe_load(open(own)) or {})
+        mine = yaml.safe_load(open(own)) or {}
+        base = mine.pop('extends', None)                                   # another sequence this one builds on (its poses, ...): the task of a map
+        if base:
+            base_file = own.parent / f'{base}.yaml'
+            if not base_file.is_file():
+                raise ValueError(f'{own.name}: extends {base!r} but {base_file} does not exist (sequences: {", ".join(sequence_names(own.parent))})')
+            parent = yaml.safe_load(open(base_file)) or {}
+            parent.pop('robot', None)
+            cfg = deep_merge(cfg, {k: v for k, v in parent.items() if k != 'robots'})
+            mine = deep_merge({'robots': parent.get('robots') or {}}, mine)
+        declared = mine.pop('robot', None)                                 # the robot this sequence is limited to (optional)
+        per_robot = mine.pop('robots', None) or {}                         # what differs for one robot: {robot name: {any key of this yaml}}
+        cfg = deep_merge(cfg, mine)
+    else:
+        per_robot = {}
+    cfg.pop('robot', None)
+    if robot and declared and robot != declared:
+        raise ValueError(f'{own.name} is the sequence of the robot {declared}, not {robot}')
+    robot = robot_name(robot or declared)
+    if per_robot.get(robot):
+        cfg = deep_merge(cfg, per_robot[robot])
     ik_file = SIM_DIR / 'bringup' / robot / 'config' / 'ik_node.yaml'
     if not ik_file.is_file():
         raise ValueError(f'{ik_file} not found: python3 isaacsim/make_robot_config.py robot:={robot}')
@@ -156,7 +200,11 @@ def load_config(path=CONFIG_FILE, robot=None):
     cfg['robot'] = {'name': robot, 'planning_group': ik['group_name'], 'arm_joints': list(ik['arm_joints']),
                     'base_link': ik['base_frame'], 'tip_link': ik['ee_link'],
                     'tool_axis': [x / length for x in tcp] if length > 1e-9 else [0.0, 0.0, 1.0], 'tcp_length': length}
-    cfg.setdefault('ik', {}).setdefault('seed', list(ik['ik_seed_deg']))
+    cfg.setdefault('ik', {})
+    if 'seed' not in cfg['ik']:                                           # the start pose of the robot = its ready pose: home pose, first IK seed
+        jp = robot_cfg.get('joint_pos') or {}                              # (rad, a joint name or a pattern of it, like robot_sim.py; unlisted = 0)
+        cfg['ik']['seed'] = ([math.degrees(next((float(v) for k, v in jp.items() if re.fullmatch(str(k), n)), 0.0)) for n in cfg['robot']['arm_joints']]
+                             if jp else list(ik['ik_seed_deg']))
     if len(cfg['ik']['seed']) != len(cfg['robot']['arm_joints']):
         raise ValueError(f'ik.seed needs one value per arm joint ({len(cfg["robot"]["arm_joints"])}): {cfg["robot"]["arm_joints"]}')
 
@@ -164,30 +212,44 @@ def load_config(path=CONFIG_FILE, robot=None):
     g['topic'] = str(robot_cfg.get('gripper_topic') or g.get('topic') or '/gripper/command')
     grip = gripper_joint(robot, robot_cfg)
     g['enabled'] = grip is not None
-    cfg.setdefault('settle', {})['gripper_joint'] = None
-    if grip:
-        cfg['settle']['gripper_joint'], g['position_closed'], g['position_open'] = grip
+    g['result_topic'] = g['topic'] + '/result'                             # robot_sim.py answers every gripper command here (reached | blocked)
 
-    sim_file = Path(path).parent / cfg['basket']['map_config']
-    with open(sim_file) as f:
-        sim = ((yaml.safe_load(f) or {}).get('scene') or {}).get('basket') or {}
-    lacking = [key for key in ('pos_m', 'size_m', 'wall_thickness_m') if key not in sim]
-    if lacking:
-        raise ValueError(f'{sim_file}: the basket: section is missing {", ".join(lacking)}')
-    cfg['basket']['floor_z'] = sim['pos_m'][2] + sim['wall_thickness_m']   # top of the basket floor
     poses = cfg.setdefault('poses', {})
-    poses.setdefault('home', 'ready')                                      # the TCP of the ready pose (asked from MoveIt at start)
-    if poses.get('place', 'auto') == 'auto':                               # above the middle of the basket
-        poses['place'] = [sim['pos_m'][0], sim['pos_m'][1], sim['pos_m'][2] + sim['size_m'][2] + float(poses.get('place_clearance', 0.45)), 180, 0, 0]
+    poses.setdefault('home', 'ready')                                      # the TCP of the start pose of the robot (asked from MoveIt at start)
+    poses.setdefault('place', 'home')                                      # where the part is let go of: the home pose, or [x, y, z, roll, pitch, yaw]
+    poses.setdefault('release', None)                                      # optional: a pose below place the gripper goes down to before it lets go
+    poses.setdefault('place_height', None)                                 # optional: travel to the x y of place at this z (home | metres), then straight down to place
+    poses.setdefault('place_offset', None)                                 # optional: travel to place raised by this many metres in z, then straight down to place
     missing = [f'{section}.{key}' for section, keys in REQUIRED_KEYS.items() for key in keys
                if key not in (cfg.get(section) or {})]
     if missing:
         raise ValueError(f'{path}: missing keys: {", ".join(missing)}')
-    inside = min(sim['size_m'][:2]) / 2 - sim['wall_thickness_m']          # radius of the circle between the walls
-    x, y = poses['place'][:2]
-    if math.hypot(x - sim['pos_m'][0], y - sim['pos_m'][1]) > inside:
-        raise ValueError(f'{path}: poses.place (x {x}, y {y}) is not above the basket '
-                         f'(centre {sim["pos_m"][:2]}, {inside:.3f} m between the walls) of {sim_file}')
+    if isinstance(poses['place'], dict):                                   # one place pose per state of the part: normalized names (turn over = turn_over)
+        poses['place'] = {str(k).strip().lower().replace(' ', '_'): v for k, v in poses['place'].items()}
+    for key, value in poses.items():
+        for v in (value.values() if isinstance(value, dict) else [value]):
+            if v is not None and not isinstance(v, str) and key in ('home', 'place', 'release') and len(v) != 6:
+                raise ValueError(f'{path}: poses.{key} needs [x, y, z, roll, pitch, yaw]')
+    if poses['place_offset'] is not None:
+        if poses['release'] is not None or poses['place_height'] is not None:
+            raise ValueError(f'{path}: poses.place_offset, poses.place_height and poses.release all say where the arm goes down to: use one of them')
+        try:
+            poses['place_offset'] = float(poses['place_offset'])
+        except (TypeError, ValueError):
+            raise ValueError(f'{path}: poses.place_offset needs a height in metres, got {poses["place_offset"]!r}') from None
+        if poses['place_offset'] <= 0:
+            raise ValueError(f'{path}: poses.place_offset must be above 0 (the arm comes from above), got {poses["place_offset"]}')
+    height = poses['place_height']
+    if height is not None:
+        if poses['release'] is not None:
+            raise ValueError(f'{path}: poses.place_height and poses.release both say where the arm goes down to: use one of them')
+        if str(height).strip().lower() == 'home':
+            poses['place_height'] = 'home'
+        else:
+            try:
+                poses['place_height'] = float(height)
+            except (TypeError, ValueError):
+                raise ValueError(f'{path}: poses.place_height needs home or a z in metres, got {height!r}') from None
     return cfg
 
 
@@ -281,26 +343,32 @@ def build_line_request(pose, cfg):
     return req
 
 
-def move(label, pose, delay=0.0, search=False):
+def move(label, pose, search=False):
     """Move step: wait delay s, then move to the flange pose. search=True: if the exact pose has no IK solution, try
     poses moved toward the base by up to tolerance.waypoint_position (for waypoints that need not be exact)"""
-    return {'label': label, 'kind': 'move', 'value': pose, 'delay': delay, 'search': search}
+    return {'label': label, 'kind': 'move', 'value': pose, 'search': search}
 
 
-def line(label, pose, start, delay=0.0):
+def line(label, pose, start):
     """Straight-line step: wait delay s, then move the flange along a straight line to pose (start: the pose the previous
     step ends at, only used by the joint-space fallback)"""
-    return {'label': label, 'kind': 'line', 'value': pose, 'start': start, 'delay': delay, 'search': False}
+    return {'label': label, 'kind': 'line', 'value': pose, 'start': start, 'search': False}
 
 
-def grip(label, value, delay=0.0):
+def joints(label, q):
+    """Joint step: the joints go straight to q (rad, arm_joints order), no IK: the home pose of a robot is its start pose, so the arm always
+    comes back in the same configuration"""
+    return {'label': label, 'kind': 'joints', 'value': list(q), 'search': False}
+
+
+def grip(label, value):
     """Gripper step: wait delay s, then publish value to the gripper topic (0 = closed, 1 = open)"""
-    return {'label': label, 'kind': 'grip', 'value': value, 'delay': delay, 'search': False}
+    return {'label': label, 'kind': 'grip', 'value': value, 'search': False}
 
 
 def ik_only(label, pose):
     """IK-only step: solves the pose with the current seed and keeps the solution as the seed of the next step, no motion"""
-    return {'label': label, 'kind': 'ik', 'value': pose, 'delay': 0.0, 'search': True}
+    return {'label': label, 'kind': 'ik', 'value': pose, 'search': True}
 
 
 def via_steps(label, start, end, max_step, max_angle):
@@ -322,30 +390,66 @@ def via_steps(label, start, end, max_step, max_angle):
     return steps
 
 
-def make_sequence(target, cfg):
-    """All steps for one /target_pose (TCP)"""
-    delays, gripper, basket = cfg['delays'], cfg['gripper'], cfg['basket']
-    place_tcp = cfg['poses']['place']
-    release_tcp = place_tcp[:2] + [basket['floor_z'] + basket['release_height']] + place_tcp[3:]  # same x y rpy, down in the basket
+def place_pose(cfg, variant=None):
+    """poses.place for the state of the part (variant): the pose itself, or the entry of the mapping (standard when there is no such state)"""
+    place = cfg['poses']['place']
+    if not isinstance(place, dict):
+        return place
+    return place.get(variant) or place.get('standard') or next(iter(place.values()))
+
+
+def make_sequence(target, cfg, variant=None):
+    """All steps for one /target_pose (TCP); variant = the state of the part (key of poses.place)"""
+    gripper, poses = cfg['gripper'], cfg['poses']
+    traj = cfg.get('trajectory') or {}
+    travel = lambda name: 'line' if str(traj.get(name, 'joint')).lower() == 'line' else 'joint'    # how the arm goes to a pose of its path
+    chosen   = place_pose(cfg, variant)
+    place_tcp = poses['home'] if chosen == 'home' else chosen
+    release_tcp = poses.get('release')                                     # below place, optional
+    if chosen != 'home' and poses.get('place_height') is not None:         # travel at place_height to above the place pose, then straight down to it
+        z = poses['home'][2] if poses['place_height'] == 'home' else poses['place_height']
+        place_tcp, release_tcp = [*chosen[:2], z, *chosen[3:]], chosen
+    elif chosen != 'home' and poses.get('place_offset') is not None:       # the place pose raised by place_offset, then straight down to it (like approach + insert of a pick)
+        place_tcp, release_tcp = [chosen[0], chosen[1], chosen[2] + poses['place_offset'], *chosen[3:]], chosen
     flange   = tcp_to_flange(target, cfg)
     approach = offset_pose(flange, -cfg['approach']['distance'], cfg['robot']['tool_axis'])  # above the target (against the TCP z axis)
-    home     = tcp_to_flange(xyzrpy_to_pose(*cfg['poses']['home']), cfg)
-    place    = tcp_to_flange(xyzrpy_to_pose(*place_tcp), cfg)             # above the basket
-    release  = tcp_to_flange(xyzrpy_to_pose(*release_tcp), cfg)           # in the basket, just above its floor
+    home     = tcp_to_flange(xyzrpy_to_pose(*poses['home']), cfg)
+    via      = [tcp_to_flange(xyzrpy_to_pose(*v), cfg) for v in (traj.get('via') or [])]  # between home and place
+    place    = tcp_to_flange(xyzrpy_to_pose(*place_tcp), cfg)
+    release  = tcp_to_flange(xyzrpy_to_pose(*release_tcp), cfg) if release_tcp else None
+    at_home  = chosen == 'home'                                            # the part is let go of at the home pose: no extra moves
     g = (lambda *a, **k: [grip(*a, **k)]) if gripper['enabled'] else (lambda *a, **k: [])    # a robot without a gripper skips these steps
+
+    def go(label, pose, start, mode):
+        """travel step to pose from where the previous step ended (start)"""
+        if mode == 'home' and cfg.get('home_joints'):                      # home = the start pose of the robot: its own joint angles
+            return joints(label, cfg['home_joints'])
+        return line(label, pose, start) if travel(mode) == 'line' else move(label, pose, search=True)
+
+    path = [] if at_home else [(f'via {i + 1}', v) for i, v in enumerate(via)] + [('place', place)]   # home -> via ... -> place
+    out, here = [], home
+    for label, pose in path:
+        out.append(go(label, pose, here, 'place' if label == 'place' else 'via'))
+        here = pose
+    back, there = [], here                                                 # the way back: the via poses reversed, then home
+    for label, pose in reversed(path[:-1]):
+        back.append(go('return ' + label, pose, there, 'via'))
+        there = pose
     return [
         *g('close gripper (start)', gripper['close']),                                # a sequence cancelled earlier may have left it open
         *via_steps('approach', home, approach, cfg['line']['ik_step'], cfg['line']['ik_angle_step']),  # IK only, no motion: the seed follows home -> approach
-        move('approach',      approach),
-        line('insert',         flange,   approach, delay=delays['descend']),          # straight down after the descend delay
-        *g('open gripper',    gripper['open'], delay=delays['open']),                 # opens after the open delay
-        line('rise',           approach, flange,   delay=delays['rise']),             # straight back up after the rise delay
-        move('home',           home,     search=True),
-        move('place',          place,    search=True),
-        line('lower',          release,  place),                                      # straight down into the basket
-        *g('close gripper',   gripper['close']),                                      # lets go of the part
-        line('lift',           place,    release,  delay=delays['gripper_wait']),     # straight up out of the basket after the gripper wait
-        move('return home',    home,     search=True),
+        go('approach', approach, home, 'approach') if travel('approach') == 'line' else move('approach', approach),
+        line('insert',         flange,   approach),                                   # straight down
+        *g('open gripper',    gripper['open']),
+        line('rise',           approach, flange),                                     # straight back up
+        go('home',             home,     approach, 'home'),
+        *out,
+        *([line('lower',       release,  here),                                       # straight down to poses.release
+           *g('close gripper', gripper['close']),                                     # lets go of the part
+           line('lift',        here,     release)]                                    # straight back up
+          if release else [*g('close gripper', gripper['close'])]),                                # lets go of the part at the place pose
+        *back,
+        *([] if at_home else [go('return home', home, there, 'home')]),
     ]
 
 
@@ -354,6 +458,13 @@ class SequenceNode(Node):
         super().__init__('moveit2_action')
         self.cfg         = cfg
         self.target_sub  = self.create_subscription(Pose, cfg['topics']['target_pose'], self.cb_target, 10)
+        self.variant     = None                                          # state of the part for the next target (ee_6d.py: the word after the pose)
+        self.seq_variant = ''                                            # state of the part of the sequence that is running (published when it is done)
+        self.done_pub    = self.create_publisher(String, cfg['topics'].get('sequence_done', '/sequence_done'), 10)
+        self.variant_sub = self.create_subscription(String, cfg['topics'].get('place_variant', '/place_variant'), self.cb_variant, 10)
+        self.turned_over = None                                          # state of the part clicked in the simulation (robot_sim.py): True = turned over, False = standard
+        self.part_sub = self.create_subscription(Bool, cfg['topics'].get('part_turned_over', '/part_turned_over'), self.cb_part,
+                                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.move_client = ActionClient(self, MoveGroup, cfg['topics']['move_action'])
         self.ik_client   = self.create_client(GetPositionIK, cfg['ik']['service'])
         self.line_client = self.create_client(GetCartesianPath, cfg['line']['service'])
@@ -371,16 +482,13 @@ class SequenceNode(Node):
         self.retry       = None  # sends the running move again (joint goal: the same goal, line: computed again)
         self.move_id     = 0   # number of the move that is running (late answers of an older move are ignored)
         self.move_handle = None  # goal handle of that move
-        self.move_timer  = None  # time limit of that move (motion.timeout)
+        self.move_timer  = None  # watchdog of that move (motion.timeout): only for a move_group that died, a normal move ends with its result
         self.init_timer  = self.create_timer(cfg['startup']['poll'], self.cb_init)  # checks until everything is up
-        # Real joint state, to tell when the arm has stopped / the gripper has finished
-        self.joint_pos   = {}       # latest position of every joint in /joint_states
-        self.arm_history = deque()  # (receive time, arm joint positions) of the last few windows
-        self.gripper_history = deque()  # (receive time, gripper joint position) of the last few windows
-        self.gripper_command_time = 0.0  # when the last gripper command was published
-        self.gripper_note = ''      # how the last gripper wait ended (reached the position / stopped short of it)
-        self.state_time  = 0.0      # receive time of the latest /joint_states
-        self.create_subscription(JointState, cfg['settle']['topic'], self.cb_joint_states, 10)
+        self.joint_pos   = {}       # latest position of every joint in /joint_states (empty until robot_sim.py is up)
+        self.gripper_pending = None  # called with the answer of robot_sim.py to the gripper command that is running
+        if self.gripper_pub:
+            self.create_subscription(String, cfg['gripper']['result_topic'], self.cb_gripper_result, 10)
+        self.create_subscription(JointState, cfg['topics']['joint_states'], self.cb_joint_states, 10)
 
     def servers_ready(self):
         return (self.move_client.server_is_ready() and self.ik_client.service_is_ready()
@@ -388,77 +496,26 @@ class SequenceNode(Node):
                 and (not isinstance(self.cfg['poses']['home'], str) or self.fk_client.service_is_ready()))
 
     def cb_joint_states(self, msg):
-        now = time.monotonic()
-        self.joint_pos  = dict(zip(msg.name, msg.position))
-        self.state_time = now
-        settle     = self.cfg['settle']
-        arm_joints = self.cfg['robot']['arm_joints']
-        if all(j in self.joint_pos for j in arm_joints):
-            self.arm_history.append((now, [self.joint_pos[j] for j in arm_joints]))
-        while self.arm_history and now - self.arm_history[0][0] > 3 * settle['arm_window']:
-            self.arm_history.popleft()
-        if settle['gripper_joint'] and settle['gripper_joint'] in self.joint_pos:
-            self.gripper_history.append((now, self.joint_pos[settle['gripper_joint']]))
-        while self.gripper_history and now - self.gripper_history[0][0] > 3 * settle['gripper_window']:
-            self.gripper_history.popleft()
+        self.joint_pos = dict(zip(msg.name, msg.position))
 
-    def arm_stopped(self):
-        """True when no arm joint moved more than arm_tolerance during the last arm_window seconds"""
-        settle, now = self.cfg['settle'], time.monotonic()
-        recent = [(t, p) for t, p in self.arm_history if now - t <= settle['arm_window']]
-        if len(recent) < 2 or now - self.state_time > 0.2:    # not enough data, or /joint_states is not coming in
-            return False
-        if now - recent[0][0] < 0.8 * settle['arm_window']:   # the data does not cover the window yet
-            return False
-        return max(max(c) - min(c) for c in zip(*[p for _, p in recent])) < settle['arm_tolerance']
-
-    def gripper_done(self, value):
-        """True when the gripper joint is at the position that the command value (0 = closed, 1 = open) asks for, or
-        when it has stopped short of it (blocked, e.g. the jaws pressing against the part). Sets gripper_note"""
-        settle, gripper, now = self.cfg['settle'], self.cfg['gripper'], time.monotonic()
-        target = gripper['position_closed'] + value * (gripper['position_open'] - gripper['position_closed'])
-        pos    = self.joint_pos.get(settle['gripper_joint'])
-        if pos is None or now - self.state_time > 0.2:             # no /joint_states coming in
-            return False
-        self.gripper_note = f"position {pos:.4f} m (command {target:.4f} m)"
-        if abs(pos - target) < settle['gripper_tolerance']:
-            return True
-        if now - self.gripper_command_time < settle['gripper_grace'] + settle['gripper_window']:
-            return False                                           # the joint may not have started moving yet
-        recent = [p for t, p in self.gripper_history if now - t <= settle['gripper_window']]
-        if len(recent) >= 2 and max(recent) - min(recent) < settle['gripper_tolerance']:
-            self.gripper_note += ' - stopped short of the target (contact)'
-            return True
-        return False
-
-    def wait_until(self, condition, then, what):
-        """Call then() as soon as condition() is true (checked every 50 ms). After settle.timeout seconds it goes on anyway"""
-        start = time.monotonic()
-
-        def check():
-            waited = time.monotonic() - start
-            if condition():
-                timer.cancel()
-                self.destroy_timer(timer)
-                self.get_logger().info(f'{what} (after {waited:.2f} s)')
-                then()
-            elif waited > self.cfg['settle']['timeout']:
-                timer.cancel()
-                self.destroy_timer(timer)
-                self.get_logger().warn(f'{what}: not confirmed after {waited:.1f} s, going on anyway')
-                then()
-        timer = self.create_timer(0.05, check)
+    def cb_gripper_result(self, msg):
+        """robot_sim.py: the gripper reached its position ('reached') or stopped short of it, e.g. the jaws pressing against the part ('blocked')"""
+        done, self.gripper_pending = self.gripper_pending, None
+        if done is None:                                       # not waiting for an answer: an old one
+            return
+        self.get_logger().info(f'gripper {msg.data}')
+        done()
 
     def cb_init(self):
         """Once everything is up (move_group, /compute_ik, fresh /joint_states): move to the home pose to initialize"""
         if self.moving:                                  # a target came in first: skip the initialization
             self.init_timer.cancel()
             return
-        if not self.servers_ready() or time.monotonic() - self.state_time > 0.5:
+        if not self.servers_ready() or not self.joint_pos:
             return
         self.init_timer.cancel()
         self.init_tries += 1
-        if isinstance(self.cfg['poses']['home'], str):   # poses.home: ready -> the TCP of the ready pose first
+        if isinstance(self.cfg['poses']['home'], str):   # poses.home: ready -> the TCP of the start pose first
             self.resolve_home()
         else:
             self.begin_init()
@@ -486,13 +543,22 @@ class SequenceNode(Node):
         q, p = tcp.orientation, tcp.position
         rpy = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('XYZ', degrees=True)
         self.cfg['poses']['home'] = [p.x, p.y, p.z, *[float(a) for a in rpy]]
-        self.get_logger().info('home pose = TCP of the ready pose: ' + ' '.join(f'{v:.3f}' for v in self.cfg['poses']['home']))
+        self.get_logger().info('home pose = TCP of the start pose of the robot: ' + ' '.join(f'{v:.3f}' for v in self.cfg['poses']['home']))
+        self.cfg['home_joints'] = list(self.ready_seed)    # the home moves go to these joint angles themselves (no IK): the same configuration every time
         self.begin_init()
 
     def begin_init(self):
         home = tcp_to_flange(xyzrpy_to_pose(*self.cfg['poses']['home']), self.cfg)
         steps = [grip('close gripper (init)', self.cfg['gripper']['close'])] if self.cfg['gripper']['enabled'] else []
-        self.start('initialization', steps + [move('home (init)', home, search=True)])
+        self.start('initialization', steps + [joints('home (init)', self.cfg['home_joints']) if self.cfg.get('home_joints') else move('home (init)', home, search=True)])
+
+    def cb_variant(self, msg):
+        self.variant = str(msg.data).strip().lower().replace(' ', '_') or None
+        self.get_logger().info(f'state of the part received: {self.variant}')
+
+    def cb_part(self, msg):
+        self.turned_over = bool(msg.data)
+        self.get_logger().info(f"part from the simulation: {'turn_over' if self.turned_over else 'standard'}")
 
     def cb_target(self, msg):
         if self.moving:
@@ -504,7 +570,27 @@ class SequenceNode(Node):
         if isinstance(self.cfg['poses']['home'], str):
             self.get_logger().warn('the home pose is not known yet (initialization has not started) -> target ignored')
             return
-        self.start('sequence', make_sequence(msg, self.cfg))
+        place, variant, self.variant = self.cfg['poses']['place'], self.variant, None    # a state applies to one target only
+        if str(self.cfg.get('target', 'tcp')).lower() == 'object':                  # the target is the part: its pose -> the TCP that grips it + its state
+            q = msg.orientation
+            roll, pitch, yaw = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('XYZ', degrees=True)
+            tcp_r, tcp_p, tcp_y, flipped = grasp.tcp_rpy(roll, pitch, yaw)
+            msg = xyzrpy_to_pose(msg.position.x, msg.position.y, msg.position.z, tcp_r, tcp_p, tcp_y)
+            variant = variant or ('turn_over' if flipped else 'standard')
+            self.get_logger().info(f"object rpy {roll:.1f} {pitch:.1f} {yaw:.1f} -> {'turned over' if flipped else 'standard'}, TCP rpy {tcp_r:.1f} {tcp_p:.1f} {tcp_y:.1f}")
+        if isinstance(place, dict):
+            if self.turned_over is not None and str(self.cfg.get('target', 'tcp')).lower() != 'object':    # the state of the clicked part in the simulation decides (the word of ee_6d.py is only the fallback)
+                sim = 'turn_over' if self.turned_over else 'standard'
+                if variant and variant != sim:
+                    self.get_logger().warn(f"ee_6d.py says {variant!r}, the simulation says {sim!r} -> {sim}")
+                variant = sim
+            if not variant:
+                self.get_logger().warn(f"no state of the part received (click the part in the simulation, or the word after the pose in ee_6d.py: {' | '.join(place)}) -> using standard")
+            if variant and variant not in place:
+                self.get_logger().warn(f"no place pose for {variant!r} (poses.place: {', '.join(place)}) -> using standard")
+            self.get_logger().info(f"part: {variant if variant in place else 'standard'} -> place {place_pose(self.cfg, variant)}")
+        self.seq_variant = ('turn_over' if variant == 'turn_over' and 'turn_over' in place else 'standard') if isinstance(place, dict) else ''
+        self.start('sequence', make_sequence(msg, self.cfg, variant))
 
     def start(self, name, steps):
         self.name   = name
@@ -517,21 +603,13 @@ class SequenceNode(Node):
         if not self.steps:
             self.get_logger().info(f'{self.name} done')
             self.moving = False
+            if self.name == 'sequence':                                      # at home again: the machines of the scene (isaacsim/machine/) go on from here
+                self.done_pub.publish(String(data=self.seq_variant))
+            elif self.name == 'recovery':                                    # back at home after a failed sequence: ready for the next target
+                self.done_pub.publish(String(data='failed'))
             return
         step = self.steps.pop(0)
-        self.after(step['delay'], lambda: self.execute(step))
-
-    def after(self, delay, fn):
-        """Run fn once after delay seconds (immediately if 0)"""
-        if delay <= 0.0:
-            fn()
-            return
-
-        def once():
-            timer.cancel()
-            self.destroy_timer(timer)
-            fn()
-        timer = self.create_timer(delay, once)
+        self.execute(step)
 
     def cancel_move_timer(self):
         if self.move_timer is not None:
@@ -554,6 +632,7 @@ class SequenceNode(Node):
         self.get_logger().error(message)
         self.steps  = []
         self.moving = False
+        self.gripper_pending = None
         if self.name == 'initialization':                         # right after launch the first move can fail: try it again
             retries = self.cfg['startup']['retries']
             if self.init_tries < retries:
@@ -562,17 +641,35 @@ class SequenceNode(Node):
                 self.init_timer = self.create_timer(self.cfg['startup']['poll'], self.cb_init)
             else:
                 self.get_logger().error('initialization failed: could not reach the home pose (a target still starts the sequence)')
+        elif self.name == 'sequence' and self.cfg['motion'].get('recover_home', True):
+            self.recover()
+        elif self.name == 'recovery':
+            self.get_logger().error('recovery failed: the arm could not go back to the home pose (a target still starts the sequence)')
+
+    def recover(self):
+        """A move of the sequence failed for good (the arm is stuck, e.g. the gripper / extension against a crate): back to the home pose, so that the
+        next target starts from there. The way back is a joint move from wherever the arm is; the gripper stays as it is (a sequence closes it first)."""
+        self.get_logger().warn('the sequence failed -> back to the home pose')
+        if self.cfg.get('home_joints'):
+            step = joints('home (recovery)', self.cfg['home_joints'])
+        else:
+            step = move('home (recovery)', tcp_to_flange(xyzrpy_to_pose(*self.cfg['poses']['home']), self.cfg), search=True)
+        self.start('recovery', [step])
 
     def execute(self, step):
         if step['kind'] == 'grip':
             self.get_logger().info(f"[{step['label']}]")
-            self.gripper_command_time = time.monotonic()
+            self.gripper_pending = self.run_next                # the next step starts with the answer of robot_sim.py
             self.gripper_pub.publish(Float64(data=step['value']))
-            self.wait_until(lambda: self.gripper_done(step['value']), self.gripper_finished, 'gripper done')
             return
         if step['kind'] == 'line':
             self.move_tries = 0
             self.plan_line(step)
+            return
+        if step['kind'] == 'joints':
+            self.seed, self.goal_q, self.move_tries = list(step['value']), list(step['value']), 0
+            self.get_logger().info(f"[{step['label']}] joints: " + ' '.join(f'{j}={math.degrees(v):.1f}' for j, v in zip(self.cfg['robot']['arm_joints'], step['value'])))
+            self.send_move()
             return
         # candidate poses for the IK: the exact pose first, then (waypoints only) poses moved toward the base
         candidates = [(step['value'], 0.0)]
@@ -604,10 +701,6 @@ class SequenceNode(Node):
                                f"ends at " + ' '.join(f'{j}={math.degrees(end[j]):.1f}' for j in joints))
         self.retry = lambda: self.plan_line(step)               # a retry starts the line again from where the arm is
         self.send_goal(self.exec_client, ExecuteTrajectory.Goal(trajectory=res.solution))
-
-    def gripper_finished(self):
-        self.get_logger().info(f'gripper {self.gripper_note}')
-        self.run_next()
 
     def try_ik(self, step, candidates, index):
         """Ask /compute_ik for candidates[index] (seeded with self.seed); on failure try the next candidate"""
@@ -676,18 +769,20 @@ class SequenceNode(Node):
                 self.fail(f'failed: {ERROR_NAMES.get(code, code)} -> remaining steps cancelled')
                 return
             self.move_tries += 1
-            self.get_logger().warn(f'{ERROR_NAMES.get(code, code)} -> trying the move again once the arm has stopped ({self.move_tries}/{retries})')
-            self.wait_until(self.arm_stopped, self.retry, 'arm stopped')       # the arm may still be moving after a failure
+            self.get_logger().warn(f'{ERROR_NAMES.get(code, code)} -> trying the move again ({self.move_tries}/{retries})')
+            self.retry()
             return
-        self.get_logger().info('arrived (MoveIt reports success)')
-        self.wait_until(self.arm_stopped, self.run_next, 'arm stopped')
+        self.get_logger().info('arrived')                                       # robot_sim.py reports success once the arm is there and at rest
+        self.run_next()
 
 
 def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--robot', help='robot name (bringup/<robot>/ and isaacsim/configs/robots/<robot>.yaml); default: `robot:` of select_robot.yaml')
+    parser.add_argument('--robot', help='robot name (bringup/<robot>/ and isaacsim/configs/robots/<robot>.yaml); default: the robot of the sequence, '
+                                        'else `scene.robot` of map.yaml')
+    parser.add_argument('--sequence', help='sequence name = isaacsim/configs/sequence/<name>.yaml (poses, trajectory and what else differs for a robot)')
     cli, ros_args = parser.parse_known_args(args)
-    cfg = load_config(robot=cli.robot)
+    cfg = load_config(robot=cli.robot, sequence=cli.sequence)
     rclpy.init(args=ros_args)
     node = SequenceNode(cfg)
     try:

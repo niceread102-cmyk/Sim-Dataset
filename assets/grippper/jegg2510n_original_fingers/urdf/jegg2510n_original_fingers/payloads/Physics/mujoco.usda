@@ -1,0 +1,210 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.2"
+    }
+    defaultPrim = "jegg2510n_original_fingers"
+    doc = """Generated from Composed Stage of root layer /tmp/tmp_ujpes14/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/usdex_jegg2510n_original_fingers/jegg2510n_original_fingers.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_jegg2510n_original_fingers_frueg78_/temp_jegg2510n_original_fingers/jegg2510n_original_fingers.usd
+
+
+Generated from Composed Stage of root layer /home/v/project/Simulation/assets/jegg2510n_original_fingers/urdf/jegg2510n_original_fingers/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    subLayers = [
+        @./physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+over "jegg2510n_original_fingers"
+{
+    over "Physics"
+    {
+        def MjcActuator "gripper_left_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, 0, -2, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 75
+            uniform double mjc:forceRange:min = -75
+            uniform double[] mjc:gainPrm = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            prepend rel mjc:target = </jegg2510n_original_fingers/Physics/gripper_left_joint>
+        }
+
+        def MjcActuator "gripper_right_joint_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, 0, -2, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 75
+            uniform double mjc:forceRange:min = -75
+            uniform double[] mjc:gainPrm = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            prepend rel mjc:target = </jegg2510n_original_fingers/Physics/gripper_right_joint>
+        }
+
+        over "gripper_left_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            custom float mjc:frictionloss = 0.05
+        }
+
+        over "gripper_right_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            custom float mjc:frictionloss = 0.05
+        }
+
+        over "flange_mount_joint"
+        {
+        }
+
+        over "flange_to_gripper_motor"
+        {
+        }
+    }
+
+    over "Geometry"
+    {
+        over "flange"
+        {
+            over "gripper_mount"
+            {
+                over "gripper_motor"
+                {
+                    over "gripper_left"
+                    {
+                        over "left_slider_m"
+                        {
+                        }
+
+                        over "left_finger_straight_m"
+                        {
+                        }
+
+                        over "left_finger_mount_spacer_visual"
+                        {
+                        }
+
+                        over "left_slider_collision_m"
+                        {
+                        }
+
+                        over "left_uploaded_finger_collision_0"
+                        {
+                        }
+
+                        over "left_uploaded_finger_collision_1"
+                        {
+                        }
+
+                        over "left_uploaded_finger_collision_2"
+                        {
+                        }
+
+                        over "left_finger_mount_spacer_collision"
+                        {
+                        }
+                    }
+
+                    over "gripper_right"
+                    {
+                        over "right_slider_m"
+                        {
+                        }
+
+                        over "right_finger_straight_m"
+                        {
+                        }
+
+                        over "right_finger_mount_spacer_visual"
+                        {
+                        }
+
+                        over "right_slider_collision_m"
+                        {
+                        }
+
+                        over "right_uploaded_finger_collision_0"
+                        {
+                        }
+
+                        over "right_uploaded_finger_collision_1"
+                        {
+                        }
+
+                        over "right_uploaded_finger_collision_2"
+                        {
+                        }
+
+                        over "right_finger_mount_spacer_collision"
+                        {
+                        }
+                    }
+
+                    over "gripper_tcp"
+                    {
+                    }
+
+                    over "gripper_motor_visual_0"
+                    {
+                    }
+
+                    over "gripper_motor_visual_1"
+                    {
+                    }
+
+                    over "gripper_motor_visual_2"
+                    {
+                    }
+
+                    over "gripper_motor_visual_3"
+                    {
+                    }
+
+                    over "gripper_motor_collision_0"
+                    {
+                    }
+
+                    over "gripper_motor_collision_1"
+                    {
+                    }
+
+                    over "gripper_motor_collision_2"
+                    {
+                    }
+                }
+
+                over "cylinder"
+                {
+                }
+
+                over "cylinder_1"
+                {
+                }
+            }
+        }
+    }
+
+    over "Materials"
+    {
+        over "mount_gray"
+        {
+        }
+    }
+
+    over "VisualMaterials"
+    {
+    }
+}
+

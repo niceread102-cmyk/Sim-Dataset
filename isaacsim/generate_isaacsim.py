@@ -4,7 +4,7 @@ runs on the GB10 machine, plus binsim's placement, sensor model, BOP/COCO/grasp 
 
     lab generate_isaacsim.py [--config configs/map/map.yaml] [--headless] [key=value ...]   (generate_supervisor.py runs it shard by shard)
     lab generate_isaacsim.py obj:=support_input_shaft obj_num:=10 out:=~/Downloads/shaft_data
-        obj:=  part yaml of configs/parts/ (with or without .yaml; make_object_config.py makes one) instead of map.yaml's first part
+        obj:=  part yaml of configs/objects/ (with or without .yaml; make_object_config.py makes one) instead of map.yaml's first part
         obj_num:=  how many of it per bin (N or [min,max]; default: the `count:` of the part yaml, else map.yaml's)
         out:=  run.output_dir
         scenes:=  run.num_scenes (piles = camera cycles)     views:=  run.views_per_scene (images per pile): scenes x views images

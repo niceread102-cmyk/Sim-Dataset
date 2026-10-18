@@ -1,8 +1,14 @@
-# The velocity values of m20_35_18d_urdf_macro.xacro (= matching the FANUC datasheet Speed entry:
-# 180/180/200/350/350/400 deg/s) are used as they are. The acceleration spec is not in the official material, so the
-# value that MoveIt's time-optimal trajectory generation (TOTG, AddTimeOptimalParameterization) requires is set to
-# 2x the velocity (reaches max speed within 0.5 s, a conservative estimate commonly used for industrial robots).
-# With has_acceleration_limits: false, TOTG itself throws an "undefined" error and nothing can be executed at all.
+# m20_35_18d: written from the URDF by isaacsim/make_robot_config.py at every run: change the URDF (or --accel-factor), not this file.
+# Velocities are the URDF velocity limits; MoveIt's time-optimal trajectory generation needs an acceleration:
+# 2 x the velocity. With has_acceleration_limits: false it throws an "undefined" error and nothing can be executed.
+# Position and effort limits are the URDF's (MoveIt reads position from there; the sim drive force limit is the effort), listed
+# here to read: position deg (m), velocity rad/s (m/s), effort N*m (N):
+#   J1: position ±170, velocity 3.14159, effort 7000
+#   J2: position -100 ~ 160, velocity 3.14159, effort 9000
+#   J3: position -90 ~ 220, velocity 3.49066, effort 4000
+#   J4: position ±200, velocity 6.10865, effort 600
+#   J5: position ±180, velocity 6.10865, effort 500
+#   J6: position ±450, velocity 6.98132, effort 300
 joint_limits:
   J1:
     has_velocity_limits: true

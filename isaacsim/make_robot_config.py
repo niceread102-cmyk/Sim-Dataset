@@ -4,7 +4,7 @@
     python3 make_robot_config.py robot:=hdr50_22 [--ee-link tool0] [--tcp 0 0 0.15] [--seed 0 30 -60 0 45 0]
                                  [--select] [--force] [--no-check] [--out DIR]
 
-Input   assets/<name>/urdf/<name>.urdf   (meshes relative to it, e.g. ../meshes/visual/base.stl). <name> is the name of the URDF FILE: a
+Input   assets/robot/<name>/urdf/<name>.urdf   (meshes relative to it, e.g. ../meshes/visual/base.stl). <name> is the name of the URDF FILE: a
         robot with several URDFs in one folder (m20_35_18d.urdf, m20_35_18d_jegg2510n.urdf with the gripper) is one robot per file:
         robot:=m20_35_18d_jegg2510n makes its own yaml and bringup folder, the arm-only m20_35_18d stays as it is.
 Output  isaacsim/configs/robots/<name>.yaml        sim: name, start pose, stiffness, damping, speed, controller
@@ -15,7 +15,8 @@ then       lab robot_sim.py robot:=<name>                 (Isaac Sim side, the j
 
 What comes from the URDF: the base link (below the empty `world` root), the arm joints from there to the end frame, their velocity
 limits (acceleration = --accel-factor x velocity: MoveIt's time parametrization needs one), the robot name of the SRDF, the links
-that touch by construction (collision check off: parent - child, fixed-joint bodies, siblings such as gripper fingers).
+that touch by construction (collision check off: parent - child, fixed-joint bodies, siblings such as gripper fingers), the joints
+that can turn more than a full turn (wrap_joints_deg of ik_node.yaml: ik_node picks their angle nearest to the current one).
 Chosen here (override with the options):
   end frame   --ee-link: IK target, z axis = tool direction (rpy 180 0 0 = tool pointing down). Default: the tool0 / tcp / flange
               frame below the last joint.  --tcp: the TCP (gripper tip) in that frame. Default: where a link with `tcp` in its name
@@ -27,8 +28,10 @@ Chosen here (override with the options):
   sim drives  stiffness 20000 N*m/deg, damping 1000, speed 0.3 (the values of m20_35_18d): tune them in the sim.
 The MoveIt check (isolated ROS domain, needs ROS sourced; --no-check skips it) finds the link pairs that collide in every pose
 (meshes that overlap at the joints), turns their collision check off, and takes the first ready pose that is collision free.
-Files that already exist are kept (--force overwrites them); an existing robot yaml is read (controller, joint_pos).
---select makes it the robot of configs/robots/select_robot.yaml (the one `lab robot_sim.py` and `robot.launch.py` start).
+Files that already exist are kept (--force overwrites them) except joint_limits.yaml: it holds nothing but what the URDF says, so
+every run writes it again from the URDF (velocity limits, acceleration, the position ranges in the comment on top). An existing
+robot yaml is read (controller, joint_pos).
+--select makes it the robot of configs/map/map.yaml (scene.robot, the one `lab robot_sim.py` and `robot.launch.py` start).
 --out DIR writes everything below DIR instead of the project (no check).
 Nothing else has to be registered: run_isaacsim.py, robot_sim.py, robot.launch.py and control/robot_sequence.py find the robot by its
 files (configs/robots/<name>.yaml, bringup/<name>/).
@@ -51,12 +54,13 @@ import yaml
 
 HERE = Path(__file__).resolve().parent                    # Simulation/isaacsim
 SIM_DIR = HERE.parent                                     # Simulation
-ASSETS_DIR = SIM_DIR / "assets"
+ASSETS_DIR = SIM_DIR / "assets" / "robot"
 BRINGUP_DIR = SIM_DIR / "bringup"
 ROBOTS_DIR = HERE / "configs" / "robots"
 LAUNCH = BRINGUP_DIR / "integration" / "launch" / "robot.launch.py"
 GROUP = "arm"                                             # planning group of every robot
 MOVABLE = ("revolute", "continuous", "prismatic")
+REFRESH = ("lim",)                                        # files that are written again at every run (only the URDF in them)
 EE_NAMES = ("tool0", "link_tcp", "tcp", "fanuc_flange", "tool", "flange", "ee_link")  # end frame candidates (z = tool direction), first match wins
 CHECK_DOMAIN = "88"                                       # isolated ROS domain of the MoveIt check
 
@@ -249,7 +253,7 @@ class Urdf:
 
 
 def find_urdf(name: str):
-    """assets/<name>/urdf/<name>.urdf, or <name>.urdf in another assets/*/urdf/ folder (several URDFs of one robot share a folder)."""
+    """assets/robot/<name>/urdf/<name>.urdf, or <name>.urdf in another assets/robot/*/urdf/ folder (several URDFs of one robot share a folder)."""
     own = ASSETS_DIR / name / "urdf" / f"{name}.urdf"
     return own if own.is_file() else next(iter(sorted(ASSETS_DIR.glob(f"*/urdf/{name}.urdf"))), own)
 
@@ -265,6 +269,46 @@ def position_limits(joints: list):
         else:
             lo.append(float(lim.get("lower"))), hi.append(float(lim.get("upper")))
     return np.array(lo), np.array(hi)
+
+
+def position_range(j) -> str:
+    """Position range of a movable URDF joint as the URDF says it, to read: deg (m for a prismatic joint), `continuous` without
+    limits. Two decimals (lite6 joint3 starts at -3.5 deg), ±x for a range around zero."""
+    lim = j.find("limit")
+    if j.get("type") == "continuous" or lim is None or lim.get("lower") is None:
+        return "continuous"
+    lo, hi = float(lim.get("lower")), float(lim.get("upper"))
+    unit = " m" if j.get("type") == "prismatic" else ""
+    if not unit:
+        lo, hi = math.degrees(lo), math.degrees(hi)
+    lo, hi = round(lo, 2) + 0.0, round(hi, 2) + 0.0       # + 0.0: no "-0"
+    return (f"±{hi:g}" if lo == -hi else f"{lo:g} ~ {hi:g}") + unit
+
+
+def wrap_joints(joints: list) -> dict:
+    """Joints whose position range is wider than a full turn (360 deg, or no limits at all): name -> (min, max) in deg, for the
+    wrap_joints_deg of ik_node.yaml. q and q +- 360 are one pose there, so the IK may return any of them and the arm would spin
+    once round. A narrower joint has one angle per pose and is left out, a prismatic joint never turns."""
+    out = {}
+    for j in joints:
+        if j.get("type") == "prismatic":
+            continue
+        lim = j.find("limit")
+        if j.get("type") == "continuous" or lim is None or lim.get("lower") is None:
+            out[j.get("name")] = (-math.inf, math.inf)
+        elif float(lim.get("upper")) - float(lim.get("lower")) > 2 * math.pi + 1e-6:
+            out[j.get("name")] = (math.degrees(float(lim.get("lower"))), math.degrees(float(lim.get("upper"))))
+    return out
+
+
+def wrap_joints_text(wrap: dict) -> str:
+    """wrap_joints_deg block of ik_node.yaml (with its comment)"""
+    num = lambda v: ".inf" if v == math.inf else "-.inf" if v == -math.inf else f"{v + 0.0:.6f}".rstrip("0").rstrip(".")
+    rows = "".join(f"\n  {j}: [{num(lo)}, {num(hi)}]" for j, (lo, hi) in wrap.items()) if wrap else " {}"
+    return ("# Joints that can turn more than a full turn (position range wider than 360 deg in the URDF) and that range (deg). The IK can\n"
+            "# return the angle of such a joint a full turn off (q +- 360) and the arm would spin once round to reach it: ik_node sends the\n"
+            "# equivalent angle nearest to the current one (inside this range and joint_limits_deg). Joints not listed are sent as solved.\n"
+            f"wrap_joints_deg:{rows}\n")
 
 
 def ready_candidates(urdf: Urdf, chain: list, count: int = 12):
@@ -347,11 +391,14 @@ def srdf_text(urdf: Urdf, base: str, ee: str, arm: list, home: dict, always: lis
     return "\n".join(out + ["</robot>", ""])
 
 
-def joint_limits_text(name, rows, factor) -> str:
-    out = [f"# {name}: generated by isaacsim/make_robot_config.py. Velocities are the URDF velocity limits; MoveIt's time-optimal",
-           f"# trajectory generation needs an acceleration: {factor:g} x the velocity. With has_acceleration_limits: false it throws an",
-           "# \"undefined\" error and nothing can be executed. Position limits come from the URDF.",
-           "joint_limits:"]
+def joint_limits_text(name, rows, factor, ranges, efforts) -> str:
+    out = [f"# {name}: written from the URDF by isaacsim/make_robot_config.py at every run: change the URDF (or --accel-factor), not this file.",
+           "# Velocities are the URDF velocity limits; MoveIt's time-optimal trajectory generation needs an acceleration:",
+           f"# {factor:g} x the velocity. With has_acceleration_limits: false it throws an \"undefined\" error and nothing can be executed.",
+           "# Position and effort limits are the URDF's (MoveIt reads position from there; the sim drive force limit is the effort), listed",
+           "# here to read: position deg (m), velocity rad/s (m/s), effort N*m (N):"]
+    out += [f"#   {j}: position {r}, velocity {v:g}, effort {e:g}" for (j, v), r, e in zip(rows, ranges, efforts)]
+    out += ["joint_limits:"]
     for j, vel in rows:
         out += [f"  {j}:", "    has_velocity_limits: true", f"    max_velocity: {vel!r}",
                 "    has_acceleration_limits: true", f"    max_acceleration: {factor * vel!r}"]
@@ -416,16 +463,18 @@ moveit_simple_controller_manager:
 """
 
 
-def ik_node_text(name, base, ee, arm, tcp, seed_deg) -> str:
+def ik_node_text(name, base, ee, arm, tcp, seed_deg, wrap) -> str:
     fmt = lambda v: "[" + ", ".join(f"{x:g}" for x in v) + "]"
     return f"""# Parameters of control/ik_node.py for {name} (generated by isaacsim/make_robot_config.py).
-base_frame: {base}
+base_frame: {base}   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts pos_m / rpy_deg of configs/robots/{name}.yaml into MoveIt's URDF)
 group_name: {GROUP}                   # config/{name}.srdf
 ee_link: {ee}                    # z axis = tool direction, so rpy (180, 0, 0) = tool pointing down
 arm_joints: [{", ".join(arm)}]
 tcp_offset: {fmt(tcp)}            # m, TCP (gripper tip) in the ee_link frame
 
-# IK seed (deg), in arm_joints order: the ready pose (= start pose of the sim). The same side of the IK solutions is always picked.
+# IK seed (deg), in arm_joints order: the ready pose (= start pose of the sim).
+# ik_node.py solves from the current joint angles: this pose is only its start before /joint_states arrives (and the start of the
+# first IK of control/robot_sequence.py).
 ik_seed_deg: {fmt(seed_deg)}
 
 # Speed: fraction of the limits MoveIt uses (velocity from the URDF, acceleration from config/joint_limits.yaml)
@@ -434,7 +483,8 @@ acceleration_scaling: 0.05
 
 # Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused.
 joint_limits_deg: {{}}
-"""
+
+{wrap_joints_text(wrap)}"""
 
 
 def sim_yaml_text(name, urdf_rel, controller, home, stiffness, damping, speed, gripper) -> str:
@@ -537,7 +587,7 @@ def _robot(a: str) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("robot", metavar="robot:=<name>", type=_robot, help="robot name = assets/<name>/urdf/<name>.urdf")
+    ap.add_argument("robot", metavar="robot:=<name>", type=_robot, help="robot name = assets/robot/<name>/urdf/<name>.urdf")
     ap.add_argument("--ee-link", help="IK target frame (default: the tool0 / tcp / flange frame below the last joint)")
     ap.add_argument("--tcp", nargs=3, type=float, metavar=("X", "Y", "Z"), help="TCP in the ee frame, m (default: from a tcp link of the URDF, else 0)")
     ap.add_argument("--seed", nargs="+", type=float, help="ready pose in deg, one value per arm joint (default: searched)")
@@ -546,7 +596,7 @@ def main():
     ap.add_argument("--damping", type=float, default=1000.0, help="sim drive damping")
     ap.add_argument("--speed", type=float, default=0.3, help="sim max joint speed = speed x URDF velocity limit")
     ap.add_argument("--accel-factor", type=float, default=2.0, help="MoveIt max acceleration = this x max velocity")
-    ap.add_argument("--select", action="store_true", help="make it the robot of select_robot.yaml")
+    ap.add_argument("--select", action="store_true", help="make it the robot of configs/map/map.yaml (scene.robot)")
     ap.add_argument("--force", action="store_true", help="overwrite files that exist")
     ap.add_argument("--no-check", action="store_true", help="no MoveIt check (collision pairs, collision free ready pose)")
     ap.add_argument("--out", type=Path, help="write below this folder instead of the project (no check)")
@@ -555,7 +605,7 @@ def main():
 
     urdf_path = find_urdf(name)
     if not urdf_path.is_file():
-        sys.exit(f"URDF not found: assets/{name}/urdf/{name}.urdf (or {name}.urdf in another assets/*/urdf/)")
+        sys.exit(f"URDF not found: assets/robot/{name}/urdf/{name}.urdf (or {name}.urdf in another assets/robot/*/urdf/)")
     miss = [m.get("filename") for m in ET.parse(urdf_path).getroot().iter("mesh")
             if "://" in m.get("filename") or not (urdf_path.parent / m.get("filename")).is_file()]
     if miss:
@@ -563,6 +613,8 @@ def main():
     urdf = Urdf(urdf_path)
     base = urdf.base_link()
     ee = args.ee_link or urdf.default_ee_link(base)
+    root = next(n for n in urdf.links if n not in urdf.parent_joint)
+    frame = root if root != base else base      # the empty `world` above the robot, else the base link: the frame of /target_pose
     chain = urdf.chain(base, ee)
     movable = [j for j in chain if j.get("type") in MOVABLE]
     arm = [j.get("name") for j in movable]
@@ -577,6 +629,7 @@ def main():
         tcp_how = "--tcp"
     vel = [(j.get("name"), float(j.find("limit").get("velocity", 0)) if j.find("limit") is not None else 0.0) for j in movable]
     vel = [(n, v if v > 0 else math.pi) for n, v in vel]
+    efforts = [float(j.find("limit").get("effort", 0)) if j.find("limit") is not None else 0.0 for j in movable]
 
     root = args.out or SIM_DIR
     yaml_file = (root / "configs" / "robots" if args.out else ROBOTS_DIR) / f"{name}.yaml"
@@ -609,14 +662,14 @@ def main():
         home = {j: float(v) for j, v in zip(arm, q)}
         return {"sim": sim_yaml_text(name, urdf_path.relative_to(SIM_DIR), controller, home, args.stiffness, args.damping, args.speed, gripper),
                 "srdf": srdf_text(urdf, base, ee, arm, home, always), "kin": kinematics_text(name),
-                "lim": joint_limits_text(name, vel, args.accel_factor), "ompl": ompl_text(name, arm),
+                "lim": joint_limits_text(name, vel, args.accel_factor, [position_range(j) for j in movable], efforts), "ompl": ompl_text(name, arm),
                 "ctrl": controllers_text(name, controller, arm),
-                "ik": ik_node_text(name, base, ee, arm, args.tcp, [math.degrees(v) for v in q])}
+                "ik": ik_node_text(name, frame, ee, arm, args.tcp, [math.degrees(v) for v in q], wrap_joints(movable))}
 
     def put(key, text):
         """Write a file unless it exists (a file written in this run may be written again)."""
         f = files[key]
-        if f.exists() and not args.force and key not in created:
+        if f.exists() and not args.force and key not in created and key not in REFRESH:
             made[key] = False
             return
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -674,8 +727,7 @@ def main():
     print(f"  {'joint':14s} {'position [deg]':>16s} {'vel [rad/s]':>12s} {'effort [N*m]':>13s} {'gravity at ready':>17s}")
     for j in movable:
         n, lim = j.get("name"), j.find("limit")
-        pos = "continuous" if lim is None or lim.get("lower") is None or j.get("type") == "continuous" \
-            else f"{math.degrees(float(lim.get('lower'))):.0f}..{math.degrees(float(lim.get('upper'))):.0f}"
+        pos = position_range(j)
         eff = float(lim.get("effort", 0)) if lim is not None else 0.0
         warn = "   <- over 70 % of the effort: the sim arm may sag" if eff > 0 and tau[n] > 0.7 * eff else ""
         print(f"  {n:14s} {pos:>16s} {dict(vel)[n]:12.3f} {eff:13.1f} {tau[n]:12.1f} N*m{warn}")
@@ -683,10 +735,14 @@ def main():
     for k, f in files.items():
         print(f"  {'written' if made.get(k) else 'kept   '}  {f if args.out else os.path.relpath(f, SIM_DIR)}")
     if args.select and not args.out:
-        sel = ROBOTS_DIR / "select_robot.yaml"
-        text = sel.read_text() if sel.is_file() else ""
-        sel.write_text(re.sub(r"(?m)^robot:.*$", f"robot: {name}", text) if re.search(r"(?m)^robot:", text) else text + f"robot: {name}\n")
-        print(f"robot: {name} in {os.path.relpath(sel, SIM_DIR)}")
+        sel = HERE / "configs" / "map" / "map.yaml"
+        text = sel.read_text()
+        new, n = re.subn(r"(?m)^(  robot:[ \t]*)\S+", lambda mo: mo.group(1) + name, text, count=1)     # the `robot:` line of `scene:`, comment kept
+        if n:
+            sel.write_text(new)
+            print(f"scene.robot: {name} in {os.path.relpath(sel, SIM_DIR)}")
+        else:
+            print(f"[WARN] no `robot:` line under scene: in {os.path.relpath(sel, SIM_DIR)}: add `  robot: {name}` there")
     if not args.out:
         print(f"next:  lab robot_sim.py robot:={name}     |     cd bringup/integration/launch && ros2 launch robot.launch.py robot:={name}")
 

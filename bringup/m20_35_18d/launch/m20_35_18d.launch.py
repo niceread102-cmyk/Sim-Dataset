@@ -47,7 +47,7 @@ BRINGUP_DIR = Path(__file__).resolve().parents[1]  # Simulation/bringup/m20_35_1
 SIM_DIR = BRINGUP_DIR.parents[1]                   # Simulation/
 CONFIG_DIR = BRINGUP_DIR / "config"
 RVIZ_FILE = BRINGUP_DIR / "rviz" / "demo.rviz"
-URDF_FILE = SIM_DIR / "assets" / "m20_35_18d" / "urdf" / "m20_35_18d.urdf"
+URDF_FILE = SIM_DIR / "assets" / "robot" / "m20_35_18d" / "urdf" / "m20_35_18d.urdf"
 IK_NODE = SIM_DIR / "control" / "ik_node.py"  # generic, the robot is in config/ik_node.yaml
 SEQUENCE_NODE = SIM_DIR / "control" / "robot_sequence.py"
 

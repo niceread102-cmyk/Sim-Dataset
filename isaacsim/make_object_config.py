@@ -4,8 +4,9 @@
     python3 make_object_config.py obj:=SUPPORT-INPUT_SHAFT [--units mm] [--mass KG | --density G_PER_CM3]
                                   [--collision convexDecomposition] [--color R G B] [--force]
 
-Input   assets/objects/<name>.stl   (.step / .obj / .ply also work; <name> is matched without regard to case)
-Output  isaacsim/configs/parts/<slug>.yaml    <slug> = <name> in lower case with `-` and spaces as `_` (SUPPORT-INPUT_SHAFT -> support_input_shaft)
+Input   assets/objects/stl/<name>.stl   (.step / .obj / .ply also work; <name> is matched without regard to case)
+        (assets/objects/usd/ is for USD assets made in the Isaac Sim GUI, e.g. the crate of the pallets)
+Output  isaacsim/configs/objects/<slug>.yaml    <slug> = <name> in lower case with `-` and spaces as `_` (SUPPORT-INPUT_SHAFT -> support_input_shaft)
 
 What is chosen here (override with the options, or edit the yaml):
   units       mm (--units: mm | cm | m | in). The size is printed: check it against the real part.
@@ -32,8 +33,8 @@ import yaml
 
 HERE = Path(__file__).resolve().parent                    # Simulation/isaacsim
 SIM_DIR = HERE.parent                                     # Simulation
-OBJECTS_DIR = SIM_DIR / "assets" / "objects"
-PARTS_DIR = HERE / "configs" / "parts"
+OBJECTS_DIR = SIM_DIR / "assets" / "objects" / "stl"
+PARTS_DIR = HERE / "configs" / "objects"
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "cm": 1e-2, "in": 0.0254}
 EXTENSIONS = (".stl", ".step", ".stp", ".obj", ".ply")
 METAL = {"color": [0.28571427, 0.2857114, 0.2857114], "color_tint": [0.66023165, 0.66022503, 0.66022503]}  # side_plate_bp
@@ -44,7 +45,7 @@ def _obj(a: str) -> str:
 
 
 def find_mesh(name: str) -> Path | None:
-    """assets/objects/<name>.<ext>, the name matched without regard to case; a path to a file works too"""
+    """assets/objects/stl/<name>.<ext>, the name matched without regard to case; a path to a file works too"""
     p = Path(name)
     if p.suffix.lower() in EXTENSIONS and p.is_file():
         return p.resolve()
@@ -79,7 +80,7 @@ def fmt(v) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("obj", metavar="obj:=<name>", type=_obj, help="object name = assets/objects/<name>.stl")
+    ap.add_argument("obj", metavar="obj:=<name>", type=_obj, help="object name = assets/objects/stl/<name>.stl")
     ap.add_argument("--units", choices=sorted(UNIT_SCALE), default="mm", help="length unit of the mesh (default mm)")
     ap.add_argument("--mass", type=float, help="mass in kg (default: mesh volume x --density)")
     ap.add_argument("--density", type=float, default=7.85, help="g/cm^3, used when --mass is not given (default 7.85, steel)")
@@ -91,7 +92,7 @@ def main():
 
     mesh_path = find_mesh(args.obj)
     if mesh_path is None:
-        sys.exit(f"mesh not found: assets/objects/{args.obj}.stl (also {', '.join(EXTENSIONS[1:])})")
+        sys.exit(f"mesh not found: assets/objects/stl/{args.obj}.stl (also {', '.join(EXTENSIONS[1:])})")
     name = slug(mesh_path.stem)
     out = PARTS_DIR / f"{name}.yaml"
 
@@ -114,7 +115,7 @@ def main():
     n = fit_count(ext)
     rel = os.path.relpath(mesh_path, PARTS_DIR).replace(os.sep, "/")
 
-    text = f"""# {mesh_path.stem}: made by make_object_config.py from assets/objects/{mesh_path.name} ({args.units}).
+    text = f"""# {mesh_path.stem}: made by make_object_config.py from assets/objects/stl/{mesh_path.name} ({args.units}).
 name: {name}
 mesh: {rel}   # {ext[0] * 1000:.1f} x {ext[1] * 1000:.1f} x {ext[2] * 1000:.1f} mm{'' if watertight else ', not watertight (PhysX warns)'}
 units: {args.units}

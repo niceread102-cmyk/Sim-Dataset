@@ -1,6 +1,6 @@
-# ROTOR-OIL_PUMP: made by make_object_config.py from assets/objects/ROTOR-OIL_PUMP.stl (mm).
+# ROTOR-OIL_PUMP: made by make_object_config.py from assets/objects/stl/ROTOR-OIL_PUMP.stl (mm).
 name: rotor_oil_pump
-mesh: ../../../assets/objects/ROTOR-OIL_PUMP.stl   # 36.0 x 37.0 x 13.4 mm
+mesh: ../../../assets/objects/stl/ROTOR-OIL_PUMP.stl   # 36.0 x 37.0 x 13.4 mm
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
 mass_kg: 0.07667       # volume 9.8 cm^3 x 7.85 g/cm^3

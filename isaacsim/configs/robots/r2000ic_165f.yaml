@@ -1,5 +1,5 @@
-# lab robot_sim.py robot:=r2000ic_165f    (URDF: ../../../assets/<name>/urdf/<name>.urdf, MoveIt: ros2 launch bringup/r2000ic_165f/launch/r2000ic_165f.launch.py). Only the robot is here:
-# the scene (bin, pile, basket, objects) is configs/map/map.yaml, the robot to start is robots/select_robot.yaml.
+# lab robot_sim.py robot:=r2000ic_165f    (URDF: ../../../assets/robot/<name>/urdf/<name>.urdf, MoveIt: ros2 launch bringup/r2000ic_165f/launch/r2000ic_165f.launch.py). Only the robot is here:
+# the scene (bin, pile, basket, objects) is configs/map/map.yaml, the robot to start is scene.robot of configs/map/map.yaml.
 name: r2000ic_165f
 gripper: none
 gripper_topic: /gripper/command   # std_msgs/Float64: 0 = closed, 1 = open (in between: partly open)

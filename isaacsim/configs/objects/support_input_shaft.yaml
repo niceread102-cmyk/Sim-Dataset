@@ -1,6 +1,6 @@
-# SUPPORT-INPUT_SHAFT: made by make_object_config.py from assets/objects/SUPPORT-INPUT_SHAFT.stl (mm).
+# SUPPORT-INPUT_SHAFT: made by make_object_config.py from assets/objects/stl/SUPPORT-INPUT_SHAFT.stl (mm).
 name: support_input_shaft
-mesh: ../../../assets/objects/SUPPORT-INPUT_SHAFT.stl   # 223.8 x 47.8 x 296.1 mm, not watertight (PhysX warns)
+mesh: ../../../assets/objects/stl/SUPPORT-INPUT_SHAFT.stl   # 223.8 x 47.8 x 296.1 mm, not watertight (PhysX warns)
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
 mass_kg: 4.166       # volume 530.7 cm^3 x 7.85 g/cm^3

@@ -4,7 +4,7 @@
     cfg.run.num_envs  -> 32
 
 Merge order (later wins): each file listed in `defaults:` -> the file itself -> CLI overrides.
-Part entries (`parts: [{config: parts/x.yaml, count: [5, 10]}]`) are expanded: the part file is
+Part entries (`parts: [{config: objects/x.yaml, count: [5, 10]}]`) are expanded: the part file is
 loaded and the entry's own keys override it. Relative file paths are resolved against the YAML
 file they appear in, so configs can be moved around together with their assets.
 """
@@ -155,12 +155,12 @@ def _slug(name: str) -> str:
 
 
 def _find_part_file(obj: str, config_dir: str) -> str:
-    """configs/parts/<obj>.yaml: <obj> with or without .yaml, matched without regard to case, `-` and `_` (SUPPORT-INPUT_SHAFT);
+    """configs/objects/<obj>.yaml: <obj> with or without .yaml, matched without regard to case, `-` and `_` (SUPPORT-INPUT_SHAFT);
     a path to a yaml works too"""
     path = os.path.expanduser(obj)
     if path.endswith((".yaml", ".yml")) and os.path.isfile(path):
         return os.path.abspath(path)
-    parts_dir = os.path.normpath(os.path.join(config_dir, "..", "parts"))
+    parts_dir = os.path.normpath(os.path.join(config_dir, "..", "objects"))
     names = sorted(f for f in os.listdir(parts_dir) if f.endswith((".yaml", ".yml"))) if os.path.isdir(parts_dir) else []
     want = _slug(os.path.splitext(os.path.basename(obj))[0] if obj.endswith((".yaml", ".yml")) else obj)
     for f in names:
@@ -173,7 +173,7 @@ def _find_part_file(obj: str, config_dir: str) -> str:
 def expand_shorthand(items: Iterable[str], config_path: str) -> list[str]:
     """Short command line words -> the dotted overrides they stand for (the other items are kept, and win over them):
 
-        obj:=<part>      parts.0.config=<configs/parts/<part>.yaml>   the part (first entry of `parts:`) that is placed in the bin
+        obj:=<part>      parts.0.config=<configs/objects/<part>.yaml>   the part (first entry of `parts:`) that is placed in the bin
         obj_num:=N       parts.0.count=[N, N]                         how many (N or [min, max]); without it the part yaml's `count:`
                                                                       is used (make_object_config.py writes one), else map.yaml's
         out:=DIR         run.output_dir=DIR

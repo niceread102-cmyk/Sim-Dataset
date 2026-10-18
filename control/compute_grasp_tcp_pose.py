@@ -56,6 +56,15 @@ def R_to_rpy(R):
     return np.rad2deg([roll, pitch, yaw])
 
 
+# Object angles (deg) -> angles (deg) of the TCP that grips it from above, and whether the object is upside down (its z, the hole axis, points
+# below the horizon: it is flipped back by 180 deg about its y first). Used by main() and by robot_sim.py (click on a part).
+def tcp_rpy(roll, pitch, yaw):
+    R = rpy_to_R(roll, pitch, yaw)
+    flipped = bool(R[2, 2] < 0)
+    tcp_r, tcp_p, tcp_y = R_to_rpy(R @ (FLIPPED_TCP_R if flipped else DEFAULT_TCP_R))
+    return tcp_r, tcp_p, tcp_y, flipped
+
+
 def main(args=None):
     print("input object [x y z] roll pitch yaw (deg) : ")
     v = list(map(float, input().split()))
@@ -66,16 +75,15 @@ def main(args=None):
     r, p, y = v[-3:]
     if xyz:
         print("x : %.3f, y : %.3f, z : %.3f" % tuple(xyz))
-    R = rpy_to_R(r, p, y)
-    flipped = R[2, 2] < 0                   # the object z (hole axis) points below the horizon: the object is upside down
+    tcp_r, tcp_p, tcp_y, flipped = tcp_rpy(r, p, y)
     print("R : %.1f, P : %.1f, Y : %.1f" % (r, p, y))
-    print(np.round(R, 4))
+    print(np.round(rpy_to_R(r, p, y), 4))
     if flipped:
         print("upside down (hole axis points down): flipped back by 180 deg about its y, then gripped from above like an upright one")
-    tcp_r, tcp_p, tcp_y = R_to_rpy(R @ (FLIPPED_TCP_R if flipped else DEFAULT_TCP_R))
     print("TCP R : %.1f, P : %.1f, Y : %.1f" % (tcp_r, tcp_p, tcp_y))
-    # to paste as-is into ee_6d.py: "x y z roll pitch yaw" if x y z were given, otherwise only "roll pitch yaw" (paste it after x y z)
-    print(" ".join(["%.3f" % c for c in xyz] + ["%.1f" % a for a in (tcp_r, tcp_p, tcp_y)]))
+    # to paste as-is into ee_6d.py: "x y z roll pitch yaw" if x y z were given, otherwise only "roll pitch yaw" (paste it after x y z); the last word
+    # is the state of the part (which place pose robot_sequence.py takes)
+    print(" ".join(["%.3f" % c for c in xyz] + ["%.1f" % a for a in (tcp_r, tcp_p, tcp_y)] + ["turn_over" if flipped else "standard"]))
 
 
 if __name__ == '__main__':

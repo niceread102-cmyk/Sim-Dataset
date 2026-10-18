@@ -1,0 +1,27 @@
+# The scene of the side plates with a number of gears for every crate: the same as map.yaml (robot, pallets, crates, part), only parts_per_crate differs.
+#   lab robot_sim.py map:=SIDE_PLATE_MAP          (this file; the map USD of the same name is scene.map of map.yaml)
+# Everything not written here is the one of map.yaml (defaults: below).
+defaults: [map]
+
+scene:
+  pallets:
+    dynamic_layers: 1              # only the top layer moves (the robot picks from it): the layers below are fixed. With 6 (every layer) the 900 free parts overflowed PhysX's GPU contact buffers
+    tilt_deg:                      # random tilt of every part from lying flat (about a horizontal axis, random direction); the physics settles them from there
+      upright: [0, 6]              #   hub up (lies on its flange)
+      flipped: [8, 35]             #   hub down (stands on its hub: leaning)
+    parts_per_crate:               # gears per crate: [pallet][layer][row][col] - one list per pallet (0, 1: the order of pallets.items), per layer (0 = bottom, 5 = top),
+                                   # per row (y of the pallet) and column (x of the pallet) of the grid of that layer (grids: [[2, 3]] = 3 rows x 2 columns of crates)
+      - # pallet 0
+        - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
+        - [[10, 10], [10, 10], [10, 10]]    # layer 1
+        - [[10, 10], [10, 10], [10, 10]]    # layer 2
+        - [[10, 10], [10, 10], [10, 10]]    # layer 3
+        - [[10, 10], [10, 10], [10, 10]]    # layer 4
+        - [[25, 25], [25, 25], [25, 25]]    # layer 5 (top)
+      - # pallet 1
+        - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
+        - [[10, 10], [10, 10], [10, 10]]    # layer 1
+        - [[10, 10], [10, 10], [10, 10]]    # layer 2
+        - [[10, 10], [10, 10], [10, 10]]    # layer 3
+        - [[10, 10], [10, 10], [10, 10]]    # layer 4
+        - [[25, 25], [25, 25], [25, 25]]    # layer 5 (top)

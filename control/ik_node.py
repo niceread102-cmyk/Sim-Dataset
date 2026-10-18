@@ -3,13 +3,16 @@
 
     python3 control/ik_node.py --config bringup/<robot>/config/ik_node.yaml
 
-ee_6d.py -> /target_pose -> this node: /compute_ik (starting from ik_seed_deg) -> joint goal to /move_action (plan+execute)
+ee_6d.py -> /target_pose -> this node: /compute_ik (starting from the current joint angles of /joint_states, so the solution is
+  the one nearest to where the arm stands; ik_seed_deg only until /joint_states has arrived; a joint that can turn a full turn
+  is then set to the angle nearest to the current one, see wrap_joints_deg) -> joint goal to /move_action (plan+execute)
   -> the FollowJointTrajectory action of the robot (the controller of bringup/<robot>/config/moveit_controllers.yaml).
 bringup/<robot>/launch/<robot>.launch.py and bringup/integration/launch/robot.launch.py (robot:=<name>) start it with
 move_group (ik_node:=false leaves it out).
 It receives the same /target_pose as control/robot_sequence.py, so run only one of the two.
 
-/target_pose: position = TCP, orientation = ee_link orientation (z axis = tool direction, so rpy 180 0 0 = tool pointing down).
+/target_pose: position = TCP, orientation = ee_link orientation (z axis = tool direction, so rpy 180 0 0 = tool pointing down), in
+base_frame of the yaml = `world`, the Isaac Sim world: the robot may stand anywhere in it (its pos_m / rpy_deg are in MoveIt's URDF).
 The IK is solved for ee_link by subtracting tcp_offset (the TCP in the ee_link frame).
 
 Customizing a robot (the yaml, see bringup/ur5e/config/ik_node.yaml):
@@ -17,6 +20,11 @@ Customizing a robot (the yaml, see bringup/ur5e/config/ik_node.yaml):
                  and the URDF), so the speed of one joint is set there and the speed of the whole motion here
   joint limits   joint_limits_deg = optional narrower range per joint: an IK solution outside it is refused (MoveIt's own
                  position limits come from the URDF / joint_limits.yaml)
+  full turns     wrap_joints_deg = the joints whose URDF range is wider than 360 deg, with that range (made by make_robot_config.py).
+                 q and q +- 360 are the same pose there and the IK may return any of them (its restarts from a random seed keep the
+                 turn), so the arm would spin once round to reach the angle. Each of these joints is set to the equivalent angle
+                 nearest to its current one (/joint_states) inside its range (and joint_limits_deg). The other joints, and a robot
+                 without the key, are sent exactly as the IK solved them.
 """
 import argparse
 import math
@@ -34,7 +42,7 @@ from moveit_msgs.srv import GetPositionIK
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
@@ -50,7 +58,9 @@ DEFAULTS = {
     'ik_timeout':           2.0,              # s
     'busy_timeout':         60.0,             # s, see IKNode._cb_target_pose
     'joint_limits_deg':     {},               # joint name -> [min, max]
+    'wrap_joints_deg':      {},               # joint name -> [min, max] of the joints that can turn a full turn (see above)
 }
+TURN = 2 * math.pi
 
 # While executing, if a trajectory from another client (RViz Plan & Execute etc.) overlaps, move_group rejects it
 # (CONTROL_FAILED), then its internal state breaks, every later goal fails and it finally dies with a segfault
@@ -73,10 +83,16 @@ def load_config(path):
     unknown = [j for j in cfg['joint_limits_deg'] if j not in cfg['arm_joints']]
     if unknown:
         raise ValueError(f'{path}: joint_limits_deg names joints that are not in arm_joints: {unknown}')
+    unknown = [j for j in cfg['wrap_joints_deg'] if j not in cfg['arm_joints']]
+    if unknown:
+        raise ValueError(f'{path}: wrap_joints_deg names joints that are not in arm_joints: {unknown}')
+    bad = [j for j, r in cfg['wrap_joints_deg'].items() if len(r) != 2 or not r[0] < r[1]]
+    if bad:
+        raise ValueError(f'{path}: wrap_joints_deg needs [min, max] with min < max per joint: {bad}')
     return cfg
 
 
-def build_ik_request(cfg, pose: Pose):
+def build_ik_request(cfg, pose: Pose, seed=None):
     R       = Rotation.from_quat([pose.orientation.x, pose.orientation.y,
                                    pose.orientation.z, pose.orientation.w]).as_matrix()
     tcp_pos = np.array([pose.position.x, pose.position.y, pose.position.z])
@@ -87,9 +103,11 @@ def build_ik_request(cfg, pose: Pose):
     ps.pose.position.x, ps.pose.position.y, ps.pose.position.z = ee_pos.tolist()
     ps.pose.orientation = pose.orientation
 
-    # IK seed: a pose goal given straight to move_group uses a random-seed IK, which can return elbow-down / flipped-wrist
-    # solutions. Starting from the same ready pose every time picks the same side of the solutions.
-    seed = [math.radians(d) for d in cfg['ik_seed_deg']]
+    # IK seed (rad, arm_joints order): the current joint angles, so the Newton iteration of the IK ends in the solution nearest
+    # to where the arm stands. From a far seed it does not converge, restarts from random angles and returns any of the (up to 8)
+    # solutions of a 6 axis arm (shoulder behind, elbow flipped, ...): the arm swings round to reach it. Before the first
+    # /joint_states, the ready pose of the yaml.
+    seed = list(seed) if seed is not None else [math.radians(d) for d in cfg['ik_seed_deg']]
 
     req = GetPositionIK.Request()
     req.ik_request.group_name                 = cfg['group_name']
@@ -110,6 +128,30 @@ def outside_limits(cfg, q):
         deg = math.degrees(q[name])
         if not lo <= deg <= hi:
             out.append(f'{name}={deg:.1f} not in [{lo}, {hi}]')
+    return out
+
+
+def nearest_turn(q, ref, lo, hi):
+    """q (rad) turned by whole turns to the angle nearest to ref inside [lo, hi] (the bounds may be infinite). q itself, unchanged,
+    when it is outside the range: that is not for this function to hide."""
+    k = round((ref - q) / TURN)                                       # whole turns that bring q nearest to ref
+    k_min = math.ceil((lo - q) / TURN - 1e-9) if lo > -math.inf else -10**9      # fewest / most turns that stay inside
+    k_max = math.floor((hi - q) / TURN + 1e-9) if hi < math.inf else 10**9
+    if k_min > 0 or k_max < 0:
+        return q
+    return q + TURN * min(max(k, k_min), k_max)
+
+
+def wrap_to_current(cfg, q, current):
+    """IK solution q (joint name -> rad) with every joint of wrap_joints_deg turned to the angle nearest to its current one (name ->
+    rad) inside its range and joint_limits_deg. A joint without a current angle, and every other joint, stays as it is."""
+    out = dict(q)
+    for name, (lo, hi) in cfg['wrap_joints_deg'].items():
+        if name in q and name in current:
+            narrow = cfg['joint_limits_deg'].get(name)
+            if narrow:
+                lo, hi = max(lo, narrow[0]), min(hi, narrow[1])
+            out[name] = nearest_turn(q[name], current[name], math.radians(lo), math.radians(hi))
     return out
 
 
@@ -153,6 +195,8 @@ class IKNode(Node):
         self._seq     = 0   # to ignore late callbacks of dropped goals
         self._own_goal_ids  = set()
         self._others_active = {}
+        self._q_now   = {}   # latest angle (rad) of every arm joint, from /joint_states: the IK seed, the angle to turn to
+        self.create_subscription(JointState, '/joint_states', self._cb_joint_states, qos_profile_sensor_data)
         status_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
         for action in MOVEIT_ACTIONS:
@@ -160,6 +204,9 @@ class IKNode(Node):
                                      lambda msg, a=action: self._on_status(a, msg), status_qos)
         self.get_logger().info(f"ik_node ready ({cfg['group_name']}, {len(cfg['arm_joints'])} joints, ee_link {cfg['ee_link']})"
                                ' — waiting for /target_pose')
+
+    def _cb_joint_states(self, msg: JointState):
+        self._q_now.update({n: p for n, p in zip(msg.name, msg.position) if n in self.cfg['arm_joints']})
 
     def _on_status(self, action: str, msg: GoalStatusArray):
         self._others_active[action] = any(
@@ -202,7 +249,13 @@ class IKNode(Node):
             self._finish(False, seq)
             return
 
-        self._ik.call_async(build_ik_request(self.cfg, pose)).add_done_callback(lambda f: self._ik_cb(f, seq))
+        joints = self.cfg['arm_joints']
+        if all(n in self._q_now for n in joints):
+            seed = [self._q_now[n] for n in joints]
+        else:
+            seed = None
+            self.get_logger().warn('no /joint_states of the arm yet: IK starts from ik_seed_deg, joint angles are not turned')
+        self._ik.call_async(build_ik_request(self.cfg, pose, seed)).add_done_callback(lambda f: self._ik_cb(f, seq))
 
     def _ik_cb(self, future, seq: int):
         if seq != self._seq:
@@ -217,6 +270,14 @@ class IKNode(Node):
         js = res.solution.joint_state
         q  = {n: p for n, p in zip(js.name, js.position) if n in joints}
         self.get_logger().info('IK: ' + ' '.join(f'{n}={math.degrees(q[n]):.1f}' for n in joints))
+        if self.cfg['wrap_joints_deg']:
+            turned = wrap_to_current(self.cfg, q, self._q_now)
+            changed = [n for n in joints if turned[n] != q[n]]
+            if changed:
+                self.get_logger().info('full turn to the angle nearest to the current one: ' + ' '.join(
+                    f'{n} {math.degrees(q[n]):.1f}->{math.degrees(turned[n]):.1f}' for n in changed))
+                js.position = [turned.get(n, p) for n, p in zip(js.name, js.position)]
+                q = turned
         bad = outside_limits(self.cfg, q)
         if bad:
             self.get_logger().error('[FAIL] IK solution outside joint_limits_deg: ' + ', '.join(bad))

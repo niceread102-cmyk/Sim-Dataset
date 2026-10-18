@@ -1,0 +1,147 @@
+<?xml version="1.0"?>
+<robot name="mhzl2_20d_with_fingertips">
+  <!-- SI units: m, kg, rad. Mesh vertices are already in meters. -->
+  <!-- q=0: closed, q=0.009: open. Right mimics left with opposite axis. -->
+  <!-- Inertias are estimates. Fingertip density assumes aluminum, 2700 kg/m^3. -->
+  <!-- Effort 33 N per jaw (datasheet: 66 N gripping force of the opening side for BOTH jaws, 42 N closing; 66 N per jaw pierced the thin hole wall). Velocity 0.05 m/s is an editable simulation default. -->
+  <material name="body_gray">
+    <color rgba="0.58 0.60 0.64 1" />
+  </material>
+  <material name="jaw_steel">
+    <color rgba="0.22 0.25 0.29 1" />
+  </material>
+  <material name="finger_blue">
+    <color rgba="0.10 0.40 0.75 1" />
+  </material>
+  <link name="mhzl2_base_link">
+    <inertial>
+      <origin xyz="2.89671410659e-05 -5.4270840864e-06 0.0349663498318" rpy="0 0 0" />
+      <mass value="0.220682701839" />
+      <inertia ixx="9.94186732479e-05" iyy="0.000121817669286" izz="5.25931759376e-05" ixy="1.0384273215e-07" ixz="-1.26770280594e-07" iyz="-6.88108477766e-09" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/body.stl" scale="1 1 1" />
+      </geometry>
+      <material name="body_gray" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/body.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="mhzl2_left_jaw_link">
+    <inertial>
+      <origin xyz="0.000678573706839 4.36690990065e-14 -0.0173863154899" rpy="0 0 0" />
+      <mass value="0.0246586490805" />
+      <inertia ixx="1.85754703073e-06" iyy="2.18841962239e-06" izz="8.28895609536e-07" ixy="3.52001383044e-17" ixz="1.11213029842e-07" iyz="2.3442984885e-18" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/jaw_left.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jaw_steel" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/jaw_left.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="mhzl2_left_fingertip_link">
+    <inertial>
+      <origin xyz="0.00205699269931 1.12872986514e-09 0.0123896917199" rpy="0 0 0" />
+      <mass value="0.0162883181265" />
+      <inertia ixx="5.33803292834e-06" iyy="6.23509452408e-06" izz="1.15197360513e-06" ixy="-1.5233053529e-13" ixz="-1.72149090423e-06" iyz="-7.74891521698e-13" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/fingertip_left.stl" scale="1 1 1" />
+      </geometry>
+      <material name="finger_blue" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/fingertip_left.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="mhzl2_right_jaw_link">
+    <inertial>
+      <origin xyz="-0.000678573706839 -4.36690990065e-14 -0.0173863154899" rpy="0 0 0" />
+      <mass value="0.0246586490805" />
+      <inertia ixx="1.85754703073e-06" iyy="2.18841962239e-06" izz="8.28895609536e-07" ixy="3.52001383044e-17" ixz="-1.11213029842e-07" iyz="-2.3442984885e-18" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/jaw_right.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jaw_steel" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/jaw_right.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="mhzl2_right_fingertip_link">
+    <inertial>
+      <origin xyz="-0.00205699269931 1.12872986523e-09 0.0123896917199" rpy="0 0 0" />
+      <mass value="0.0162883181265" />
+      <inertia ixx="5.33803292834e-06" iyy="6.23509452408e-06" izz="1.15197360513e-06" ixy="1.52330535281e-13" ixz="1.72149090423e-06" iyz="-7.74891521661e-13" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/fingertip_right.stl" scale="1 1 1" />
+      </geometry>
+      <material name="finger_blue" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://mhzl2_20d_description/meshes/fingertip_right.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="mhzl2_left_joint" type="prismatic">
+    <parent link="mhzl2_base_link" />
+    <child link="mhzl2_left_jaw_link" />
+    <origin xyz="-0.01215 0 0.09" rpy="0 0 0" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper="0.009" effort="33" velocity="0.05" />
+  </joint>
+  <joint name="mhzl2_left_fingertip_fixed" type="fixed">
+    <parent link="mhzl2_left_jaw_link" />
+    <child link="mhzl2_left_fingertip_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <joint name="mhzl2_right_joint" type="prismatic">
+    <parent link="mhzl2_base_link" />
+    <child link="mhzl2_right_jaw_link" />
+    <origin xyz="0.01215 0 0.09" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="0" upper="0.009" effort="33" velocity="0.05" />
+    <mimic joint="mhzl2_left_joint" multiplier="1" offset="0" />
+  </joint>
+  <joint name="mhzl2_right_fingertip_fixed" type="fixed">
+    <parent link="mhzl2_right_jaw_link" />
+    <child link="mhzl2_right_fingertip_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  <link name="mhzl2_tcp" />
+  <joint name="mhzl2_tcp_fixed" type="fixed">
+    <parent link="mhzl2_base_link" />
+    <child link="mhzl2_tcp" />
+    <origin xyz="0 0 0.15" rpy="0 0 0" />
+  </joint>
+</robot>

@@ -2,7 +2,7 @@
 # Everything not set here (depth range, noise, mount, texture exposure) comes from phoxi_m.yaml. The PAJ-042 preset
 # (phoxi_paj042.yaml, 2472 x 2064) is unchanged: switch `defaults` in configs/map/map.yaml to use it again.
 #
-# Measured from the photos, NOT from a calibration file: the outline of the bin rim (the STL of parts/bin.yaml, a
+# Measured from the photos, NOT from a calibration file: the outline of the bin rim (the STL of objects/bin.yaml, a
 # rounded rectangle 520 x 365 mm in one plane) was fitted to the rim seen in the photos (pose of the camera + radial
 # distortion): median error 1.7 px along the rim, against 13 px for an ideal pinhole. Undistorted with the values below
 # the rim, the wall slots and the hole columns of the walls come out straight (checked by eye).

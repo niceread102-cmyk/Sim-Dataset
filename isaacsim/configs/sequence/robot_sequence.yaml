@@ -1,30 +1,39 @@
 # Parameters of robot_sequence.py (pick & place sequence), the same for every robot. Edit them and restart the node to apply.
-# What belongs to the robot is not here: planning group, arm joints, base / end frame, TCP length and the IK seed are read from
-# bringup/<robot>/config/ik_node.yaml, the gripper (topic, joint, positions) from configs/robots/<robot>.yaml and the gripper URDF
+# What belongs to the robot is not here: planning group, arm joints, base / end frame and TCP length are read from
+# bringup/<robot>/config/ik_node.yaml, the start pose (the IK seed and home), the gripper (topic, joint, positions) from configs/robots/<robot>.yaml and the gripper URDF
 # (no gripper: no gripper steps). configs/sequence/<robot>.yaml (optional) overrides any key below for one robot.
 #
-# Pose lists are TCP (gripper tip) targets in base_link: [x, y, z (m), roll, pitch, yaw (deg)] — the same values and
+# Pose lists are TCP (gripper tip) targets in the world frame (ik_node.yaml base_frame: the Isaac Sim world, robots stand at pos_m / rpy_deg of their yaml): [x, y, z (m), roll, pitch, yaw (deg)] — the same values and
 # the same intrinsic XYZ convention as the input of ee_6d.py. rpy 180 0 0 = tool pointing down (at the floor).
 #
 # Sequence on every /target_pose:
-#   close gripper -> approach -> (delays.descend) insert -> (delays.open) open gripper -> (delays.rise) rise back to
-#   approach -> home -> place (above the basket) -> lower into the basket -> close gripper (lets go of the part) ->
-#   (delays.gripper_wait) lift back to place -> home
-# insert / rise / lower / lift are straight lines of the tool (see line), the other moves are joint goals.
+#   close gripper -> approach -> insert -> open gripper -> rise back to approach -> home -> place ->
+#   [lower to poses.release] -> close gripper (lets go of the part) -> [lift back to place] -> home
+# Every step starts when the one before it has finished (result of the trajectory action, answer of robot_sim.py to a gripper command): no delays.
+# insert / rise (and lower / lift) are straight lines of the tool (see line), the other moves are joint goals.
 # At start (once move_group is up) the node first closes the gripper and moves to the home pose.
+# The sequence belongs to the robot alone: nothing of the scene (map, pallets, boxes, basket) is read here.
 
-poses:
+target: tcp                           # what /target_pose is: tcp = the pose of the TCP | object = the pose of the part (the sequence works out the TCP pose
+                                      #    that grips it and whether the part is standard or turned over, for poses.place)
+
+poses:                                # TCP [x, y, z (m), roll, pitch, yaw (deg)] in the world frame, or a keyword
   home: ready                         # initialization pose = home pose (at start, after opening the gripper, end of the sequence):
-                                      #    ready = the TCP of the ready pose (ik_seed_deg of the robot's ik_node.yaml), or [x, y, z, roll, pitch, yaw]
-  place: auto                         # above the basket: auto = the middle of the basket, place_clearance above its rim, tool down; or
-                                      #    [x, y, z, roll, pitch, yaw] (x y must be inside the basket walls). The gripper goes down into the
-                                      #    basket from here (see basket), lets go of the part and comes back up to here
-  place_clearance: 0.45               # m, TCP height above the basket rim of place: auto
+                                      #    ready = the TCP of the start pose of the robot (joint_pos of configs/robots/<robot>.yaml; the
+                                      #    ik_seed_deg of its ik_node.yaml if the yaml has none), or [x, y, z, roll, pitch, yaw]
+  place: home                         # where the part is let go of: home = the home pose (no extra moves), [x, y, z, roll, pitch, yaw], or one
+                                      #    pose per state of the part: {standard: [...], turn_over: [...]} (see configs/sequence/side_plate.yaml)
+  release: null                       # optional [x, y, z, roll, pitch, yaw] below place: the gripper goes straight down to it, lets go of the
+                                      #    part and comes back up to place (a basket, a tray). null = it lets go of the part at place
+  place_height: null                  # optional, instead of release: the arm travels at this z (home = the height of the home pose, or metres) to the x y of the
+                                      #    place pose, then goes straight down to the z of the place pose, lets go of the part and comes back up. null = off
+  place_offset: null                  # optional, instead of place_height / release: the arm goes to the place pose raised by this many m in z (like the approach of a pick),
+                                      #    then straight down by the same distance, lets go of the part and comes back up. null = off
 
 approach:
   distance: 0.2               # m, the approach pose is this far from the target, against the TCP z axis
 
-line:                         # straight-line moves of the tool: insert / rise at the target, lower / lift in the basket
+line:                         # straight-line moves of the tool: insert / rise at the target, lower / lift to poses.release
   service: /compute_cartesian_path   # MoveIt: IK every max_step along the line, timed with motion.velocity/acceleration_scaling
   action: /execute_trajectory        # MoveIt: runs that trajectory on the controller of the robot
   max_step: 0.005             # m, distance between the IK points of the line
@@ -32,22 +41,14 @@ line:                         # straight-line moves of the tool: insert / rise a
                               #    configuration) ends the line there
   min_fraction: 0.999         # less of the line possible (out of reach, jump, collision) -> a joint goal instead (warning).
   ik_step: 0.1                # m, that joint goal is solved at poses this far apart first (no motion): one IK call over a long
-                              #    way (the 0.9 m into the basket) can land on another arm configuration; 0.3 m flipped the wrist
+                              #    way can land on another arm configuration; 0.3 m flipped the wrist
   ik_angle_step: 15           # deg, the same for the rotation: the approach pose is solved in steps from the home pose that are at
-                              #    most ik_step m and ik_angle_step deg apart. One IK call from the ready pose to a tool that is
+                              #    most ik_step m and ik_angle_step deg apart. One IK call from the start pose to a tool that is
                               #    turned ~110 deg and tilted 30 deg returned a different, folded arm on different calls
-
-basket:                       # the basket of the Isaac Sim scene, where the gripper lets go of the part
-  map_config: ../map/map.yaml # relative to this file. Its `scene: basket:` section (pos_m, size_m, wall_thickness_m) creates the
-                              #    basket in Isaac Sim and is read here too, so the basket and the descent cannot disagree
-                              #    (world = base_link while the robot stands at the origin)
-  release_height: 0.05        # m, from the place pose the TCP goes straight down to this height above the basket floor (top of
-                              #    the floor = pos_m z + wall_thickness_m), then the gripper closes. The part hangs at the
-                              #    TCP, so this is how far it drops
 
 # Every move is a joint goal solved by a seeded IK. A pose goal lets MoveIt pick any IK solution, and a TCP pose like
 # the home pose can have very different ones: a natural "L" shape of the arm and a folded "Z" shape. The seeded IK always
-# takes the solution nearest to its seed. The seed is the ready pose (ik_seed_deg of the robot's ik_node.yaml, tool down): the IK
+# takes the solution nearest to its seed. The seed is the start pose of the robot (joint_pos of its yaml): the IK
 # of the first step of every sequence starts there, every next step starts from the solution of the previous step.
 ik:
   service: /compute_ik
@@ -55,30 +56,10 @@ ik:
   retry_timeout: 0.3          # s, per IK call while searching inside the waypoint tolerance
   avoid_collisions: true
 
-# The delays start counting when the real state (/joint_states, see settle) says the previous action is finished,
-# not when MoveIt reports success: the arm has stopped after a move, the gripper joint has reached its position
-# after a gripper command.
-delays:                       # s
-  descend: 1.0                # after the arm stopped at the approach pose, until inserting
-  open: 1.0                   # after the arm stopped at the insert pose, until opening the gripper
-  rise: 0.5                   # after the gripper has opened, until rising back to the approach pose
-  gripper_wait: 1.0           # after the gripper has closed (let go of the part in the basket), until lifting out of the basket
-
 startup:                      # the first move (to the home pose) after the node starts
   poll: 1.0                   # s, how often to check whether move_group, /compute_ik and /joint_states are up
   retries: 3                  # right after launch move_group may not have received /joint_states yet and rejects the move
                               #    (CONTROL_FAILED, start state mismatch): the move is tried again this many times
-
-settle:                       # how "finished" is decided from /joint_states
-  topic: /joint_states
-  arm_window: 0.3             # s, the arm has stopped when no arm joint moved more than arm_tolerance during this time
-                              #    (positions are used: the velocity of /joint_states is not reliable)
-  arm_tolerance: 0.0005       # rad
-  gripper_tolerance: 0.0002   # m, the gripper is done when its joint is this close to the commanded position, or when
-                              #    it stopped moving short of it (blocked by the part, e.g. the jaws pressing against it)
-  gripper_grace: 0.3          # s, after a command the joint gets this time to start moving before "stopped" can count
-  gripper_window: 0.3         # s, the joint has stopped when it moved less than gripper_tolerance during this time
-  timeout: 5.0                # s, stop waiting after this (a warning is logged), so the sequence never hangs
 
 tolerance:
   joint: 0.001                # rad, goal tolerance of every arm joint
@@ -93,15 +74,21 @@ motion:
   planning_attempts: 1
   retries: 2                  # a move that fails (e.g. TIMED_OUT, CONTROL_FAILED) is tried again, from wherever the arm
                               #    is, once the arm has stopped; the sequence is cancelled only after this many retries
+  recover_home: true          # a sequence that fails for good (the arm is stuck, e.g. the gripper / extension against a crate) goes back to the home pose by itself and
+                              #    is ready for the next target; /sequence_done then says `failed`. false = the arm stays where it stopped
   timeout: 120.0              # s, a move that has not finished after this long (e.g. move_group died) is cancelled and stops the
                               #    sequence. MoveIt has no time limit of its own; the simulator is slower than the plan, so keep it generous
 
 gripper:                      # topic = gripper_topic of the robot yaml (default /gripper/command); the joint that is waited for and its
                               # positions for 0 / 1 (the limits in the URDF) come from the gripper URDF; no gripper = no gripper steps
-  topic: /gripper/command     # std_msgs/Float64
+  topic: /gripper/command     # std_msgs/Float64; robot_sim.py answers each command on <topic>/result (std_msgs/String: reached | blocked)
   open: 1.0                   # command value: 0 = closed, 1 = open (in between: partly open)
   close: 0.0
 
 topics:
   target_pose: /target_pose   # geometry_msgs/Pose, TCP target
   move_action: /move_action   # MoveIt MoveGroup action
+  joint_states: /joint_states   # sensor_msgs/JointState from robot_sim.py: the first move waits until it is coming in
+  place_variant: /place_variant   # std_msgs/String, state of the part for the next target (ee_6d.py): selects the entry of poses.place (only used while nothing was clicked in the simulation)
+  sequence_done: /sequence_done   # std_msgs/String published when a sequence is done and the robot is at home again: the state of the part it placed (standard | turn_over)
+  part_turned_over: /part_turned_over   # std_msgs/Bool from robot_sim.py (latched), the part clicked in the simulation: True = turned over (poses.place turn_over), False = standard. Decides the place pose
