@@ -1,0 +1,490 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="conveyor">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0.0203249902 0.505899966" />
+      <mass value="80" />
+      <inertia ixx="10.052976" iyy="22.924368" izz="19.327488" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/base_link.stl" />
+      </geometry>
+      <material name="base_link_color">
+        <color rgba="0.6 0.64 0.68 1" />
+      </material>
+    </visual>
+    <collision name="leg_272.885_242.47">
+      <origin xyz="-0.7449999 -0.2876002 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_692.885_242.47">
+      <origin xyz="-0.3249999 -0.2876002 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_1332.885_242.47">
+      <origin xyz="0.3150001 -0.2876002 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_1762.885_242.47">
+      <origin xyz="0.7450001 -0.2876002 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="beam_242.47_39">
+      <origin xyz="9.99999998e-08 -0.2876002 0.069" rpy="0 0 0" />
+      <geometry>
+        <box size="1.55 0.06 0.06" />
+      </geometry>
+    </collision>
+    <collision name="beam_242.47_805">
+      <origin xyz="9.99999998e-08 -0.2876002 0.835" rpy="0 0 0" />
+      <geometry>
+        <box size="1.55 0.06 0.06" />
+      </geometry>
+    </collision>
+    <collision name="leg_272.885_817.67">
+      <origin xyz="-0.7449999 0.2875998 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_692.885_817.67">
+      <origin xyz="-0.3249999 0.2875998 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_1332.885_817.67">
+      <origin xyz="0.3150001 0.2875998 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="leg_1762.885_817.67">
+      <origin xyz="0.7450001 0.2875998 0.482" rpy="0 0 0" />
+      <geometry>
+        <box size="0.06 0.06 0.766" />
+      </geometry>
+    </collision>
+    <collision name="beam_817.67_39">
+      <origin xyz="9.99999998e-08 0.2875998 0.069" rpy="0 0 0" />
+      <geometry>
+        <box size="1.55 0.06 0.06" />
+      </geometry>
+    </collision>
+    <collision name="beam_817.67_805">
+      <origin xyz="9.99999998e-08 0.2875998 0.835" rpy="0 0 0" />
+      <geometry>
+        <box size="1.55 0.06 0.06" />
+      </geometry>
+    </collision>
+    <collision name="rail_240.67">
+      <origin xyz="9.99999998e-08 -0.2959002 0.933" rpy="0 0 0" />
+      <geometry>
+        <box size="1.554 0.047 0.136" />
+      </geometry>
+    </collision>
+    <collision name="rail_767.67">
+      <origin xyz="9.99999998e-08 0.2550998 0.933" rpy="0 0 0" />
+      <geometry>
+        <box size="1.554 0.095 0.136" />
+      </geometry>
+    </collision>
+    <collision name="belt_static_deck">
+      <origin xyz="-0.0019999 -0.0324002 0.9761" rpy="0 0 0" />
+      <geometry>
+        <box size="1.49 0.48 0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="drive_sprocket_link">
+    <inertial>
+      <origin xyz="-1.86264515e-09 -9.77888703e-09 -4.32133675e-07" />
+      <mass value="1" />
+      <inertia ixx="0.00063736684" iyy="0.0011440653" izz="0.0006373651" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/drive_sprocket_link.stl" />
+      </geometry>
+      <material name="drive_sprocket_link_color">
+        <color rgba="0.85 0.55 0.2 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
+      <geometry>
+        <cylinder radius=".0415" length=".028" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="conveyor_drive_joint" type="continuous">
+    <parent link="base_link" />
+    <child link="drive_sprocket_link" />
+    <origin xyz="-0.46999995 0.21725 0.76844849" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="20" velocity="20" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <!-- The 13 pairs of attachments (ring, pin, two prongs: the same as the flipper_jig of the laser marker) of the straight run of the chain, 0.1 m apart along x, one in each of the two rows
+       (y -0.212 and 0.148), cut out of base_link.stl (original: ~/backup/conveyor_base_link_original.stl). The two pairs on the turn of the chain at the ends stay in base_link. -->
+  <link name="jig_pair_0">
+    <inertial>
+      <origin xyz="-0.592 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_0.stl" />
+      </geometry>
+      <material name="jig_pair_0_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_0_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_0.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_1">
+    <inertial>
+      <origin xyz="-0.492 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_1.stl" />
+      </geometry>
+      <material name="jig_pair_1_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_1_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_1.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_2">
+    <inertial>
+      <origin xyz="-0.392 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_2.stl" />
+      </geometry>
+      <material name="jig_pair_2_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_2_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_2.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_3">
+    <inertial>
+      <origin xyz="-0.292 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_3.stl" />
+      </geometry>
+      <material name="jig_pair_3_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_3_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_3.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_4">
+    <inertial>
+      <origin xyz="-0.192 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_4.stl" />
+      </geometry>
+      <material name="jig_pair_4_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_4_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_4.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_5">
+    <inertial>
+      <origin xyz="-0.092 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_5.stl" />
+      </geometry>
+      <material name="jig_pair_5_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_5_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_5.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_6">
+    <inertial>
+      <origin xyz="0.008 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_6.stl" />
+      </geometry>
+      <material name="jig_pair_6_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_6_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_6.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_7">
+    <inertial>
+      <origin xyz="0.108 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_7.stl" />
+      </geometry>
+      <material name="jig_pair_7_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_7_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_7.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_8">
+    <inertial>
+      <origin xyz="0.208 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_8.stl" />
+      </geometry>
+      <material name="jig_pair_8_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_8_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_8.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_9">
+    <inertial>
+      <origin xyz="0.308 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_9.stl" />
+      </geometry>
+      <material name="jig_pair_9_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_9_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_9.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_10">
+    <inertial>
+      <origin xyz="0.408 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_10.stl" />
+      </geometry>
+      <material name="jig_pair_10_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_10_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_10.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_11">
+    <inertial>
+      <origin xyz="0.508 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_11.stl" />
+      </geometry>
+      <material name="jig_pair_11_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_11_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_11.stl" />
+      </geometry>    </collision>
+  </link>
+  <link name="jig_pair_12">
+    <inertial>
+      <origin xyz="0.608 -0.032 0.9965" rpy="0 0 0" />
+      <mass value="0.6" />
+      <inertia ixx="0.002" iyy="0.002" izz="0.002" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <geometry>
+        <mesh filename="../mashes/jig_pair_12.stl" />
+      </geometry>
+      <material name="jig_pair_12_color">
+        <color rgba="0.62 0.64 0.66 1" />
+      </material>
+    </visual>
+    <collision name="jig_pair_12_mesh">
+      <geometry>
+        <mesh filename="../mashes/jig_pair_12.stl" />
+      </geometry>    </collision>
+  </link>
+  <joint name="jig_pair_0_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_1_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_1" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_2_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_2" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_3_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_3" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_4_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_4" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_5_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_5" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_6_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_6" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_7_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_7" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_8_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_8" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_9_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_9" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_10_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_10" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_11_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_11" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="jig_pair_12_joint" type="prismatic">
+    <parent link="base_link" />
+    <child link="jig_pair_12" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2" upper="2" effort="100" velocity="0.5" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+</robot>

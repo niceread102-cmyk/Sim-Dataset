@@ -113,8 +113,8 @@ def main():
     robot = arg("robot", "m20_35_18d_mhzl2_20d")
     cfg_map = yaml.safe_load(open(HERE / "configs" / "map" / "map.yaml"))
     ry = yaml.safe_load(open(HERE / "configs" / "robots" / f"{robot}.yaml"))
-    pf = (cfg_map["scene"].get("platform") or {}).get("size_m", [0, 0, 0])
-    h = float(arg("platform", ry.get("pos_m", [0, 0, 0])[2] + pf[2]))
+    pfd = cfg_map["scene"].get("platform") or {}
+    h = float(arg("platform", ry.get("pos_m", [0, 0, 0])[2] + (pfd.get("pos_m", [0, 0, 0])[2] + pfd["size_m"][2] if pfd.get("size_m") else 0.0)))
     gripper = float(arg("gripper", 0.15))
     urdf = m.Urdf(m.find_urdf(robot))
     chain = urdf.chain(urdf.base_link(), "fanuc_flange")

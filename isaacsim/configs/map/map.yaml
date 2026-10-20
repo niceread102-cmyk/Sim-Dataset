@@ -15,6 +15,10 @@ scene:                        # robot_sim.py (lab robot_sim.py): what stands aro
   map: SIDE_PLATE_MAP         # (SIDE_PLATE_MAP_light = the old light copy, no RobotStand) an environment made in the Isaac Sim GUI: a USD of assets/map/ (name or path); null = none.
                               # On the command line: `lab robot_sim.py map:=SIDE_PLATE_MAP_light` (wins), `map:=none`. Its top-level prims (not the render
                               # settings / viewport cameras / light rig its stage saved) go to /World/map; the colliders set in the GUI are used as they are
+  map_collision:              # the collision of parts of the map (robot_sim.py, at start; the map USD has them as made in the GUI): convexHull | convexDecomposition | meshSimplification | none (triangle mesh) | off (no collider)
+    - {prim: SIDE_PLATE_MAP/Pallet, collision: convexDecomposition, options: {max_hulls: 64, voxel_resolution: 1000000, error_percentage: 5.0}}   # the pallets (one mesh of 315 k faces): a hull put one slab over the floor between them; the decomposition keeps them apart. options as the machines have them; `off` = no collider (the cheapest), `convexHull` = one hull for both
+  map_edits:                  # parts of the map stretched in height (robot_sim.py, at start): every vertex of the meshes below `prim` above above_z_m moves up by dz_m
+    - {prim: SIDE_PLATE_MAP/RobotStand, above_z_m: 0.5, dz_m: 0.1}   # the stand of the robot: its four columns 100 mm longer, the top plate (and the robot on it) at 1.1 m = platform 1100 mm
   pallets:                    # crates of parts stacked on the pallets of the map (SIDE_PLATE_MAP): remove this section = none (binsim/pallets.py)
     seed: random              # random = a new random arrangement on every start (printed), a number = the same one every time
     items:                    # the pallets that get crates: pos_m = centre of the deck at deck top height, yaw_deg (measured from the pallet mesh of
@@ -25,6 +29,7 @@ scene:                        # robot_sim.py (lab robot_sim.py): what stands aro
       size_m: [0.520, 0.365, 0.200]  # outer x y z, the long side is x
       inner_size_m: [0.4516, 0.3042] # usable floor x y (the old 0.330 x 0.200 floor stretched with the crate)
       floor_z_m: 0.0149              # top of the crate floor (old 0.0078 x 1.905)
+      collision: meshSimplification  # collision of the crate mesh: meshSimplification = the shape of the crate (floor, walls, hollow inside) with fewer triangles | convexHull = one solid hull per crate (the parts that move lie on top of it) | convexDecomposition | none = the triangle mesh of the file
       gap_m: 0.002                   # between crates of a layer: 3 x 0.365 + 2 gaps = 1.099 m, a layer fills the 1.1 m pallet
     part: side_plate          # configs/objects/<part>.yaml, dropped in at random place / yaw, lying flat (either side up)
     parts_per_crate: 10
@@ -34,19 +39,34 @@ scene:                        # robot_sim.py (lab robot_sim.py): what stands aro
     dynamic_layers: 1         # parts of the top N layers are free bodies (gravity, the robot picks them); the ones below are fixed. 6 = every layer = 720 free parts: very slow (the crates stay fixed)
   machines:                   # articulated machines (URDF assets/machine/<name>/urdf/<name>.urdf) with joints that move: remove this section = none
     - name: laser_marker      # fitted to the STL copy of it in the map (SIDE_PLATE_MAP.usd, /SIDE_PLATE_MAP/LaserMarker): the URDF is turned by -90 deg about z (its long y axis is x there)
-      pos_m: [-1.2223, -0.6579, 0.0]   # the base_link of the URDF in the world (m); the meshes match the STL to 0.2 mm
+      urdf: laser_marker/urdf/laser_marker_v2.urdf   # below assets/machine/: v2 = lasermarker_v2.stl (4 carriers on the belt, 2 fixed seats at the flipper); the first version is laser_marker/urdf/laser_marker.urdf (delete this line to use it, with the 5 carriers below)
+      pos_m: [-1.2223, -0.6579, 0.0]   # (z 0: the frame stands on the floor and the belt pads lie in the rail slots; the belt is 18 mm lower in the URDF (pads in the slits) and the left station 56 mm so that its hands fit the belt, and the conveyor is lowered, see below) the base_link of the URDF in the world (m); the meshes match the STL to 0.2 mm
       rpy_deg: [0, 0, -90]
       replaces: SIDE_PLATE_MAP/LaserMarker   # prim of the map USD (below /World/map) that is switched off, because the machine is the same thing
-      speed: 1.0              # max joint speed = speed x URDF velocity limit (flip joints 0.6 rad/s, jaws 0.03 m/s)
-      collision_decomposition: ["left_gripper_.*", "right_gripper_.*", "carrier_.*", "flipper_jig"]   # link-name regexes: the jaws (collision = their STL, the pocket for the plate), the carriers and the attachment of the flipper are convexDecomposition, not a hull (a hull fills the pocket / the ring)
-      carriers:               # the five carriers of the belt (cut out of base_link.stl) move in steps, stop-and-go, and run round: leaving at the -y end, back at the +y end
-        joints: [carrier_0_joint, carrier_1_joint, carrier_2_joint, carrier_3_joint, carrier_4_joint]   # in the order of slots_m
-        slots_m: [-0.83, -0.47, -0.11, 0.25, 0.61]   # where each carrier stands at rest, y of the URDF (-0.83, -0.47 and 0.61 are under the jaws): 0.36 m apart
-        window_m: [-1.01, 0.79]                      # the loop along y of the URDF: 5 x 0.36 = 1.8 m. Past -1.01 a carrier reappears at 0.79
-        speed_mps: 0.1                               # m/s while it moves
+      # speeds (joints, belt / chain m/s, acceleration): speeds: of configs/sequence/side_plate.yaml (scene.speeds_file of SIDE_PLATE_MAP.yaml); without it the machine joints run at 1 x the URDF limit
+      materials:              # real metal (colour, metallic 1, a low roughness = gloss); a link contains the links below it, so the later rules win for their parts
+        - {links: ["base_link"], color: [0.66, 0.68, 0.71], metallic: 1.0, roughness: 0.38}               # frame: brushed aluminium
+        - {links: ["left_station", "right_station"], color: [0.72, 0.74, 0.77], metallic: 1.0, roughness: 0.30}   # the arms of the two stations
+        - {links: ["left_rotor", "right_rotor"], color: [0.50, 0.52, 0.56], metallic: 1.0, roughness: 0.28}      # rotors: darker aluminium
+        - {links: ["left_gripper_.*", "right_gripper_.*"], color: [0.36, 0.38, 0.41], metallic: 1.0, roughness: 0.20}   # jaws: steel
+        - {links: ["carrier_.*", "flipper_jig", "seat_.*"], color: [0.58, 0.60, 0.63], metallic: 1.0, roughness: 0.30}      # carriers and the attachment: steel
+        - {links: ["laser_station"], color: [0.52, 0.58, 0.64], metallic: 0.9, roughness: 0.25}                  # the housing of the laser: glossy painted steel
+      collision_decomposition:   # {link-name regex: options}: the jaws (the pocket for the plate) are cut on a fine grid (32 hulls, 3 M voxels, 1 % error: PhysX defaults 500 k voxels and 10 % rounded the round pocket), the carriers and the seats with the defaults
+        "left_gripper_.*": {max_hulls: 32, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
+        "right_gripper_.*": {max_hulls: 32, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
+        "carrier_.*": {sdf: 512}   # the jigs with thin-topped prongs: their exact shape as a signed distance field (a convex cut, even a fine one, puts hulls into the empty space beside the prongs and the plate lies on the tips); the plate that is picked has its exact shape too (robot_sim.py CLICK_SDF)
+        "flipper_jig": {}
+        "seat_.*": {}
+      collision_friction: {"carrier_.*": 0.15}   # {link-name regex: friction}: the jigs of the belt are oiled (the prongs are sloped on purpose: a plate that is a little off in its angle slides down them into the windows); friction combine mode min = the plate does not add any
+      # (before: ["left_gripper_.*", "right_gripper_.*", "carrier_.*", "flipper_jig", "seat_.*"], all with the PhysX defaults)
+      carriers:               # the carriers of the belt (v2: four, cut out of lasermarker_v2.stl) move in steps, stop-and-go, and run round: leaving at the -y end, back at the +y end
+        joints: [carrier_0_joint, carrier_1_joint, carrier_2_joint, carrier_3_joint]   # in the order of slots_m (v2: four carriers; the first version had carrier_4_joint too)
+        slots_m: [-0.83, -0.47, -0.11, 0.25]         # where each carrier stands at rest, y of the URDF (-0.83 and -0.47 are under the left hands): 0.36 m apart (first version: ... 0.25, 0.61)
+        window_m: [-1.01, 0.43]                      # the loop along y of the URDF: 4 x 0.36 = 1.44 m. Past -1.01 a carrier reappears at 0.43 (first version: [-1.01, 0.79], 5 carriers)
         # topic: /laser_marker/carriers              # (default) std_msgs/Int32: n > 0 = advance n pitches (0.36 m each), 0 = stop. /laser_marker/carriers/moving (Bool): True while it moves
       joint_pos:              # start pose (rad / m), default 0: the jaws start open (upper limit 0.01 m: the pocket of 55.5 mm becomes 75.5 mm, a plate of 55.56 mm goes in), the flipper rotor at 90 deg (rest, out of the way: isaacsim/machine/laser_marker.py), the left rotor at 0
         right_flip_joint: 1.5708
+        left_flip_joint: 1.5708   # the left rotor (the two pairs of hands of the left station) rests at 90 deg too
         left_gripper_1_jaw_a_joint: 0.01
         left_gripper_1_jaw_b_joint: 0.01
         left_gripper_2_jaw_a_joint: 0.01
@@ -54,6 +74,23 @@ scene:                        # robot_sim.py (lab robot_sim.py): what stands aro
         right_gripper_jaw_a_joint: 0.01
         right_gripper_jaw_b_joint: 0.01
       # ROS 2: ros2 topic pub --once /laser_marker/joint_command sensor_msgs/msg/JointState "{name: [left_flip_joint], position: [3.14]}"   (state: /laser_marker/joint_states)
+    - name: conveyor          # the conveyor of the map as a URDF (a drive sprocket that turns): the STL copy of it in the map (/SIDE_PLATE_MAP/Conveyor, 180 MB) is switched off
+      urdf: conveyopr/urdf/conveyor.urdf   # below assets/machine/ (the folders are spelled like this on disk: conveyopr, mashes)
+      pos_m: [-1.8399, 0.7521, -0.081]      # (z -0.081: the hands of the laser marker, which take the plate off the belt and turn it over, put it 63 mm lower than they took it; the feet go below the floor) base_link in the world: fitted to the STL by its outline (1.554 x 0.696 x 1.012 m) and the drive side that sticks out; turned by -90 deg about z
+      rpy_deg: [0, 0, -90]
+      replaces: SIDE_PLATE_MAP/Conveyor
+      materials:              # real metal, see the laser marker
+        - {links: ["base_link"], color: [0.62, 0.64, 0.67], metallic: 1.0, roughness: 0.40}              # frame and rails: brushed steel
+        - {links: ["jig_pair_.*"], color: [0.50, 0.52, 0.55], metallic: 1.0, roughness: 0.28}            # the attachments: steel
+        - {links: ["drive_sprocket_link"], color: [0.30, 0.31, 0.34], metallic: 1.0, roughness: 0.30}    # sprocket: dark steel
+      collision_decomposition:   # the jigs of the chain (ring, pointed prongs: a plate goes onto them) have their exact shape, not a hull: a fine convexDecomposition
+        "jig_pair_.*": {sdf: 512}
+      collision_friction: {"jig_pair_.*": 0.15}   # the jigs of the chain are oiled too (see the belt of the laser marker)
+      carriers:               # the 13 pairs of attachments of the chain move in steps along x of the URDF (one pitch = 0.1 m) and run round: leaving at -x, back at +x
+        joints: [jig_pair_0_joint, jig_pair_1_joint, jig_pair_2_joint, jig_pair_3_joint, jig_pair_4_joint, jig_pair_5_joint, jig_pair_6_joint, jig_pair_7_joint, jig_pair_8_joint, jig_pair_9_joint, jig_pair_10_joint, jig_pair_11_joint, jig_pair_12_joint]
+        slots_m: [-0.592, -0.492, -0.392, -0.292, -0.192, -0.092, 0.008, 0.108, 0.208, 0.308, 0.408, 0.508, 0.608]   # x of each pair at rest; the last one (0.608) is under the left hands of the laser marker
+        window_m: [-0.642, 0.658]                    # the loop: 13 x 0.1 = 1.3 m
+        # topic: /conveyor/carriers                  # (default) std_msgs/Int32: n > 0 = advance n pitches (0.1 m each), 0 = stop. /conveyor/carriers/moving (Bool): True while it moves
   objects: []                 # single rigid parts, configs/objects/<part>.yaml; pos_m = part center (world, m), e.g.
                               # - {part: side_plate, pos_m: [1.2, 0.0, 0.02], rpy_deg: [0, 0, 0]}
   # bin:                        # [off by default: uncomment to use] picking test: the bin + a pile dropped into it (remove or leave empty = no bin)

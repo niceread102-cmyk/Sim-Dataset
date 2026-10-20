@@ -61,6 +61,7 @@ MAP_FILE = SIM_DIR / "isaacsim" / "configs" / "map" / "map.yaml"
 IK_NODE = SIM_DIR / "control" / "ik_node.py"       # generic, the robot is in config/ik_node.yaml
 SEQUENCE_NODE = SIM_DIR / "control" / "robot_sequence.py"
 SEQUENCE_DIR = SIM_DIR / "isaacsim" / "configs" / "sequence"
+CONVEYOR_STEP = SIM_DIR / "isaacsim" / "machine" / "conveyor.py"        # moves the chain of the conveyor one step when the left hands of the laser marker have let go of their plates
 LASER_MARKER = SIM_DIR / "isaacsim" / "machine" / "laser_marker.py"   # the flipper of the laser marker: runs when the sequence has put a turned-over plate on it
 
 
@@ -236,7 +237,8 @@ def launch_setup(context, *args, **kwargs):
     if use_sequence:
         controllers.append(ExecuteProcess(cmd=[sys.executable, str(SEQUENCE_NODE), "--robot", robot, "--sequence", seq], name="robot_sequence", output="screen"))
         if laser_marker_enabled(context):
-            controllers.append(ExecuteProcess(cmd=[sys.executable, str(LASER_MARKER)], name="laser_marker", output="screen"))
+            controllers.append(ExecuteProcess(cmd=[sys.executable, str(LASER_MARKER), "--sequence", seq], name="laser_marker", output="screen"))
+            controllers.append(ExecuteProcess(cmd=[sys.executable, str(CONVEYOR_STEP)], name="conveyor_step", output="screen"))
 
     show_rviz = LaunchConfiguration("rviz").perform(context).lower() == "true"
     return [GroupAction([LogInfo(msg=f"robot {robot}: {urdf_file.relative_to(SIM_DIR)} + bringup/{robot}/config, base in the world at "
@@ -253,7 +255,7 @@ def generate_launch_description():
         DeclareLaunchArgument("sequence", default_value="",
                               description="Name of a sequence (isaacsim/configs/sequence/<name>.yaml, made for one robot): run control/robot_sequence.py with it instead of ik_node. Empty = only ik_node"),
         DeclareLaunchArgument("laser_marker", default_value="true",
-                              description="With sequence:=<name>: also run isaacsim/machine/laser_marker.py (flip, hold and move the belt of the laser marker after a turned-over plate was placed). false = leave it out"),
+                              description="With sequence:=<name>: also run isaacsim/machine/laser_marker.py (flip, hold and move the belt of the laser marker after a plate was placed) and conveyor.py (one step of the conveyor chain after the left hands let go). false = leave them out"),
         DeclareLaunchArgument("rviz", default_value="true", description="Start RViz"),
         OpaqueFunction(function=launch_setup),
     ])

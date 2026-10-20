@@ -36,8 +36,8 @@ approach:
 line:                         # straight-line moves of the tool: insert / rise at the target, lower / lift to poses.release
   service: /compute_cartesian_path   # MoveIt: IK every max_step along the line, timed with motion.velocity/acceleration_scaling
   action: /execute_trajectory        # MoveIt: runs that trajectory on the controller of the robot
-  max_step: 0.005             # m, distance between the IK points of the line
-  revolute_jump_threshold: 0.3   # rad, a joint changing more than this between two points (the arm would switch to another
+  max_step: 0.005                    # m, distance between the IK points of the line
+  revolute_jump_threshold: 0.3       # rad, a joint changing more than this between two points (the arm would switch to another
                               #    configuration) ends the line there
   min_fraction: 0.999         # less of the line possible (out of reach, jump, collision) -> a joint goal instead (warning).
   ik_step: 0.1                # m, that joint goal is solved at poses this far apart first (no motion): one IK call over a long
@@ -67,9 +67,7 @@ tolerance:
                               #    toward the robot base by up to this distance (1/4, 1/2, then the full distance).
                               #    for poses on the edge of the workspace, e.g. TCP (1, 1, 1) is about 3 mm out of reach
 
-motion:
-  velocity_scaling: 0.1
-  acceleration_scaling: 0.1
+motion:                       # the speed of the arm (velocity_scaling, acceleration_scaling) is not here: it is speeds.<robot> of the sequence yaml (side_plate.yaml)
   planning_time: 5.0          # s
   planning_attempts: 1
   retries: 2                  # a move that fails (e.g. TIMED_OUT, CONTROL_FAILED) is tried again, from wherever the arm
@@ -84,11 +82,15 @@ gripper:                      # topic = gripper_topic of the robot yaml (default
   topic: /gripper/command     # std_msgs/Float64; robot_sim.py answers each command on <topic>/result (std_msgs/String: reached | blocked)
   open: 1.0                   # command value: 0 = closed, 1 = open (in between: partly open)
   close: 0.0
+  # the wait after letting go of a part is waits.release of the sequence yaml (side_plate.yaml), all waiting times are there
 
 topics:
   target_pose: /target_pose   # geometry_msgs/Pose, TCP target
   move_action: /move_action   # MoveIt MoveGroup action
   joint_states: /joint_states   # sensor_msgs/JointState from robot_sim.py: the first move waits until it is coming in
   place_variant: /place_variant   # std_msgs/String, state of the part for the next target (ee_6d.py): selects the entry of poses.place (only used while nothing was clicked in the simulation)
+  target_part_pose: /target_part_pose   # geometry_msgs/Pose from robot_sim.py: the pose of the part the robot goes for (5 Hz): the transfer takes where the plate lies and its yaw from it
+  machine_ready: /laser_marker/ready   # std_msgs/Empty from laser_marker.py: the part lies at the standard coordinate (placed there, or turned over to it) -> the transfer (transfer: of the sequence) starts
+  transfer_done: /transfer_done   # std_msgs/Empty published when the transfer is done and the arm is at home again: laser_marker.py moves the belt one pitch
   sequence_done: /sequence_done   # std_msgs/String published when a sequence is done and the robot is at home again: the state of the part it placed (standard | turn_over)
   part_turned_over: /part_turned_over   # std_msgs/Bool from robot_sim.py (latched), the part clicked in the simulation: True = turned over (poses.place turn_over), False = standard. Decides the place pose

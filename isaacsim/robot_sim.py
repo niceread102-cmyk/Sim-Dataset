@@ -62,6 +62,7 @@ import os
 import re
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 from collections import deque
 
@@ -249,6 +250,8 @@ def load_settings(path, name, gripper):
         if top:
             s["pos_m"] = [pos[0], pos[1], pos[2] + top]
             print(f"[INFO] the robot stands on the platform: z = {pos[2]:g} + {top:g} m", flush=True)
+    s["map_edits"] = scene.get("map_edits") or []
+    s["map_collision"] = scene.get("map_collision") or []
     s["pallets"] = pc = scene.get("pallets") or None   # crates of parts stacked on the pallets of the map (binsim/pallets.py)
     if pc:
         try:
@@ -284,9 +287,29 @@ def load_settings(path, name, gripper):
     if k and any(key not in k for key in ("pos_m", "size_m", "wall_thickness_m")):
         print(f"[WARN] basket skipped: basket of {MAP_FILE} (scene:) needs pos_m, size_m and wall_thickness_m", flush=True)
         s["basket"] = None
+    speeds = {}                                    # speeds of the cell: `speeds:` of the file named by scene.speeds_file (SIDE_PLATE_MAP.yaml -> configs/sequence/side_plate.yaml)
+    if scene.get("speeds_file"):
+        sf = os.path.normpath(os.path.join(REPO, "configs", "map", str(scene["speeds_file"])))
+        speeds = (yaml.safe_load(open(sf)) or {}).get("speeds") or {} if os.path.isfile(sf) else {}
+        s["speeds_path"] = sf
+        s["pallet_physics"] = {(int(pl_.get("pallet", 0)), int(ly.get("layer", 0))): (bool(ly.get("physics", True)), None if ly.get("crates") is None else {int(i) for i in ly["crates"]})     # pallets: of the same file: physics true / false per pallet and layer (0 = bottom)
+                               for pl_ in ((yaml.safe_load(open(sf)) or {}).get("pallets") or []) if isinstance(pl_, dict) for ly in (pl_.get("layers") or []) if isinstance(ly, dict)} if os.path.isfile(sf) else {}
+        s["hand_slots"] = ((yaml.safe_load(open(sf)) or {}).get("hands") or {}) if os.path.isfile(sf) else {}    # hands: of the same file: where the plates lie for the hand pairs
+        s["part_pose_near"] = (((yaml.safe_load(open(sf)) or {}).get("transfer") or {}).get("pick") or [None])[:2] if os.path.isfile(sf) else [None]   # the plate nearest to this x y (the standard coordinate) is the one whose pose is published
+        s["fixtures"] = (yaml.safe_load(open(sf)) or {}).get("fixtures") or {} if os.path.isfile(sf) else {}    # fixtures: of the same file (friction of the jigs): read again while the simulation runs
+        if not speeds:
+            print(f"[WARN] no `speeds:` in {sf}: the speeds of the yaml files of robot and machines are used", flush=True)
+        else:
+            print(f"[INFO] speeds of the cell from {os.path.relpath(sf, REPO)}: {json.dumps(speeds)}", flush=True)
+    rs = speeds.get(s["name"]) or {}                                     # settling checks of the arm and of its gripper (module constants, set in main())
+    s["sim_consts"] = {k: t(rs[key]) for k, key, t in (("ARRIVE_TOL", "arrive_tolerance_rad", float), ("SETTLE_FRAMES", "arrive_settle_frames", int),
+                                                         ("GRIP_GRACE", "gripper_grace_frames", int), ("GRIP_WINDOW", "gripper_window_frames", int)) if key in rs}
+    if (speeds.get(s["name"]) or {}).get("joints") is not None:    # max joint speed of the arm (x URDF limit), wins over `speed:` of the robot yaml
+        s["speed"] = float(speeds[s["name"]]["joints"])
     s["machines"] = []                             # articulated machines standing in the map (assets/machine/<name>/urdf/<name>.urdf)
     for m in scene.get("machines") or []:
-        urdf = os.path.join(MACHINES, str(m.get("name")), "urdf", f"{m.get('name')}.urdf")
+        urdf = (os.path.join(MACHINES, str(m["urdf"])) if m.get("urdf")      # `urdf:` = a path below assets/machine/ (a folder or file that is not named like the machine)
+                else os.path.join(MACHINES, str(m.get("name")), "urdf", f"{m.get('name')}.urdf"))
         if not os.path.isfile(urdf):
             print(f"[WARN] machine {m.get('name')} skipped: URDF not found: {urdf}", flush=True)
             continue
@@ -295,7 +318,15 @@ def load_settings(path, name, gripper):
             print(f"[WARN] machine {m['name']} skipped: {len(miss)} mesh(es) of {urdf} not found: {miss[:3]}", flush=True)
             continue
         joints, mimic = urdf_joints(urdf)
-        s["machines"].append({**m, "model": f"machine_{m['name']}", "urdf": urdf, "joints": joints, "mimic": mimic})
+        sp = speeds.get(m["name"]) or {}                                   # the speeds of the cell win over the machine entry of map.yaml
+        cs = sp.get("belt_mps", sp.get("chain_mps"))                       # laser marker: belt, conveyor: chain (m/s)
+        ca = sp.get("belt_accel_mps2", sp.get("chain_accel_mps2"))         # ... and how softly they start and stop (m/s^2)
+        m = {**m, **({"speed": float(sp["joints"])} if "joints" in sp else {}),
+             "joint_speeds": [(rx, float(sp[k])) for k, rx in (("flipper_gripper", r"right_.*"), ("two_arm_gripper", r"left_.*")) if k in sp],
+             "accel_rot": sp.get("rotor_accel_rad_s2"), "accel_lin": sp.get("jaw_accel_m_s2"), "rotor_damping": sp.get("rotor_damping"),
+             **({"carriers": {**m["carriers"], **({"speed_mps": float(cs)} if cs is not None else {}), **({"accel_mps2": float(ca)} if ca is not None else {})}} if m.get("carriers") else {})}
+        s["machines"].append({**m, "model": f"machine_{m['name']}", "urdf": urdf, "joints": joints, "mimic": mimic,
+                              "friction_override": ((s.get("fixtures") or {}).get(m["name"]) or {}).get("friction")})
     return s
 
 
@@ -347,18 +378,19 @@ robot = load_settings(os.path.abspath(args.config), args.name, args.gripper)  # 
 if importlib.util.find_spec("rclpy") is None:
     sys.exit("rclpy not found: source ROS 2 first (source /opt/ros/jazzy/setup.bash)")
 args.experience = args.experience or os.path.expanduser(
-    "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit")  # same kit as generate_isaacsim.py
+    "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.full.kit")  # same kit as generate_isaacsim.py
 if not args.headless:
     args.visualizer = args.visualizer or ["kit"]
 simulation_app = AppLauncher(args).app
 
 import numpy as np  # noqa: E402
 import omni.timeline  # noqa: E402
+import omni.ui as ui  # noqa: E402
 import omni.usd  # noqa: E402
 import rclpy  # noqa: E402
 from control_msgs.action import FollowJointTrajectory  # noqa: E402
 from isaacsim.core.experimental.prims import Articulation, RigidPrim  # noqa: E402
-from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade  # noqa: E402
+from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt  # noqa: E402
 from rclpy.action import ActionServer, CancelResponse, GoalResponse  # noqa: E402
 from rclpy.callback_groups import ReentrantCallbackGroup  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
@@ -389,17 +421,30 @@ GRIP_TOL, GRIP_GRACE, GRIP_WINDOW = 0.0002, 18, 18   # m, frames, frames
 # The part that is clicked in the viewport gets this many convex hulls (every other part keeps the max_convex_hulls of its object yaml, 32):
 # only the part the fingers go into needs the exact shape of its bore, and ~900 parts with hundreds of hulls overflow the PhysX GPU buffers.
 # Drives of the machines (scene.machines): a small machine, not an arm. USD units: N*m/deg and N*m*s/deg (angular), N/m and N*s/m (linear).
-# The damping times the URDF speed limit stays below the URDF effort (flip: 5 x 34 deg/s = 170 < 300 N*m, jaws: 100 x 0.03 m/s = 3 < 100 N).
+# The damping times the highest joint speed (the URDF speed limit x `speed` of the machine, 2: flip 1.2 rad/s = 69 deg/s, jaws 0.06 m/s) stays below the URDF effort
+# (flip: 2.5 x 69 deg/s = 172 < 300 N*m, jaws: 100 x 0.06 m/s = 6 < 100 N).
 MACHINE_STIFFNESS = {"angular": 100.0, "linear": 5000.0}
-MACHINE_DAMPING = {"angular": 5.0, "linear": 100.0}
+MACHINE_DAMPING = {"angular": 2.5, "linear": 100.0}
+# The joints of a machine speed up and slow down smoothly (the command is a velocity ramp, not a jump to full speed) and the command of a rotor never runs
+# further ahead of the measured angle than MACHINE_LEAD: a rotor that is held (a jaw on the plate, the conveyor) cannot wind up a big error and then shoot off.
+MACHINE_ACCEL = {"angular": 3.0, "linear": 0.5}   # rad/s^2, m/s^2
+MACHINE_LEAD = 0.08                               # rad
+CARRIER_ACCEL = 0.5                               # m/s^2: the belt starts and stops softly, so the plates on the carriers do not slide (friction 0.5 holds up to 4.9)
 # The part that is clicked is published as std_msgs/Bool on PART_TOPIC: True = turned over (the word `turn_over` of the line printed for ee_6d.py), False = standard.
 # Latched (transient local), so a control node that starts later still gets the last click. control/robot_sequence.py takes the place pose of the part from it.
 PART_TOPIC = "/part_turned_over"
+HAND_TOPIC = "/laser_marker/hand_plates"          # std_msgs/Int32, 5 Hz: bit i = a plate lies in front of the hand pair i of the two-arm gripper (configs/sequence/<sequence>.yaml hands:)
+PART_POSE_TOPIC = "/target_part_pose"           # geometry_msgs/Pose, world frame: the pose of the part the robot goes for (the one that has the fine collider), 5 Hz; control/robot_sequence.py takes its yaw to turn it right while it carries it to the jig
 TARGET_RADIUS = 0.04   # m: the part of the pile this close to a /target_pose is the one the robot goes to pick
 CLICK_HULLS = 1000
+CLICK_VOXELS = 3000000   # voxel resolution of the same collider (PhysX default 500000): the hulls follow the thin wall of the bore closely
 HULLS_ATTR = "physxConvexDecompositionCollision:maxConvexHulls"
+VOXELS_ATTR, VOXELS_DEFAULT = "physxConvexDecompositionCollision:voxelResolution", 500000
+DECOMPOSITION_ATTRS = {"max_hulls": ("maxConvexHulls", "Int"), "voxel_resolution": ("voxelResolution", "Int"), "error_percentage": ("errorPercentage", "Float"),
+                       "min_thickness": ("minThickness", "Float"), "hull_vertex_limit": ("hullVertexLimit", "Int"), "shrink_wrap": ("shrinkWrap", "Bool")}   # option -> attribute of PhysxConvexDecompositionCollisionAPI
 # The clicked part (the one the fingers push against) also gets the stiff contact settings, so a finger pushing hard on the thin
 # hole wall does not sink through it. Every other part keeps the PhysX defaults: with ~120 free parts these cost far too much.
+CLICK_KEEP = 40                                   # how many picked / clicked parts keep the fine collider at the same time (a plate that lies on a jig has to keep it: the hulls of its windows); the oldest beyond it go back to their own
 CLICK_PHYSX = {"CreateSolverPositionIterationCountAttr": (16, 4), "CreateSolverVelocityIterationCountAttr": (2, 1),
                "CreateEnableCCDAttr": (True, False), "CreateMaxDepenetrationVelocityAttr": (0.5, 3.0)}   # (clicked, default)
 
@@ -426,6 +471,8 @@ class RobotBridge(Node):
         self._goal = None                               # the running trajectory (see _execute / _track_arm)
         self._grip = None                               # the gripper command that has not been answered yet (see _track_gripper)
         self._grip_pub = self.create_publisher(String, f"{gripper_topic}/result", 10) if self._gripper else None
+        self._part_pose_pub = self.create_publisher(Pose, PART_POSE_TOPIC, 10)
+        self._hand_pub = self.create_publisher(Int32, HAND_TOPIC, 10)
         self._part_pub = self.create_publisher(Bool, PART_TOPIC, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(JointTrajectory, f"{controller}/joint_trajectory", self._on_traj, 10)
         self._action = ActionServer(
@@ -435,6 +482,9 @@ class RobotBridge(Node):
         self._state_pub = self.create_publisher(JointState, "/joint_states", 10)
         self.capture_requested = threading.Event()   # set by the topic, handled in the sim loop (Kit calls only on the main thread)
         self.create_subscription(Empty, "/wrist_camera/capture", lambda _: self.capture_requested.set(), 10)
+        self.pictures = deque()                      # paths of the pictures of control/vision_pick.py (the sim loop shows the newest, PicturePanel)
+        self.create_subscription(String, "/vision_pick/picture", lambda m: self.pictures.append(m.data), QoSProfile(
+            depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.targets_seen = deque()                  # (x, y, z) of every /target_pose: the part there is handled like a clicked one (see refine_target in the sim loop)
         self.create_subscription(Pose, "/target_pose", lambda m: self.targets_seen.append((m.position.x, m.position.y, m.position.z)), 10)
 
@@ -452,6 +502,12 @@ class RobotBridge(Node):
     def _on_traj(self, msg):
         if msg.points:
             self._set(msg.joint_names, msg.points[-1].positions)
+
+    def publish_part_pose(self, pos, quat_wxyz):
+        msg = Pose()
+        msg.position.x, msg.position.y, msg.position.z = (float(v) for v in pos)
+        msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z = (float(v) for v in quat_wxyz)
+        self._part_pose_pub.publish(msg)
 
     def publish_turned_over(self, flipped):
         """the state of the clicked part: True = turned over, False = standard (PART_TOPIC)"""
@@ -769,25 +825,72 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
 
 
 def set_collision_decomposition(stage, patterns, root=ROBOT_PATH):
-    """collision_decomposition: link-name regexes of the robot yaml (or of a machine, below its prim `root`). The colliders under these links (the URDF collision meshes, which the converter
+    """collision_decomposition: link-name regexes of the robot yaml (or of a machine, below its prim `root`), or {regex: options} with the options of the
+    decomposition: a number = most convex hulls, or a mapping of DECOMPOSITION_ATTRS (max_hulls, voxel_resolution, error_percentage, ...; PhysX defaults:
+    32 hulls, 500000 voxels, 10 % error). The colliders under these links (the URDF collision meshes, which the converter
     makes convexHull) become convexDecomposition, so the fingers keep their exact shape. The instances under them are made editable first (only on
     this stage; the cached USD is unchanged). Returns the number of colliders."""
-    rx = [re.compile(str(q)) for q in patterns]
-    roots = [p for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if any(r.fullmatch(p.GetName()) for r in rx)]
+    spec = dict(patterns) if isinstance(patterns, dict) else {q: None for q in patterns}
+    rx = [(re.compile(str(q)), n) for q, n in spec.items()]
+    roots = [(p, next(n for r, n in rx if r.fullmatch(p.GetName()))) for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if any(r.fullmatch(p.GetName()) for r, _ in rx)]
     while True:                                   # instances can be nested (instanced mesh -> instanced material)
-        inst = [p for r in roots for p in Usd.PrimRange(r) if p.IsInstance()]
+        inst = [p for r, _ in roots for p in Usd.PrimRange(r) if p.IsInstance()]
         if not inst:
             break
         for p in inst:
             p.SetInstanceable(False)
     done = set()                                  # the link roots are nested (gripper_mount contains gripper_motor, ...): every collider once
-    for r in roots:
+    for r, spec_value in roots:
+        options = {"max_hulls": spec_value} if isinstance(spec_value, (int, float)) and spec_value else dict(spec_value or {})
+        sdf = options.pop("sdf", None)               # {sdf: 512}: the exact shape of the mesh as a signed distance field (resolution along the longest side), not hulls: thin prongs and windows stay
+        bad = [k for k in options if k not in DECOMPOSITION_ATTRS]
+        if bad:
+            sys.exit(f"collision_decomposition: unknown option {bad} (known: {', '.join(DECOMPOSITION_ATTRS)})")
         for p in Usd.PrimRange(r):
+            if p.IsA(UsdGeom.Mesh) and p.HasAPI(UsdPhysics.CollisionAPI) and p.GetPath() not in done and sdf:
+                UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr("sdf")
+                PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(p).CreateSdfResolutionAttr(int(sdf))
+                done.add(p.GetPath())
+                continue
             if p.IsA(UsdGeom.Mesh) and p.HasAPI(UsdPhysics.CollisionAPI) and p.GetPath() not in done:
                 UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr("convexDecomposition")
                 p.AddAppliedSchema("PhysxConvexDecompositionCollisionAPI")
+                for key, value in options.items():
+                    name, kind = DECOMPOSITION_ATTRS[key]
+                    p.CreateAttribute(f"physxConvexDecompositionCollision:{name}", getattr(Sdf.ValueTypeNames, kind)).Set(
+                        {"Int": int, "Float": float, "Bool": bool}[kind](value))
                 done.add(p.GetPath())
     return len(done)
+
+
+def set_collision_friction(stage, patterns, root, name="machine", override=None):
+    """collision_friction: {link-name regex: friction} below the prim `root` (a machine): the colliders of these links get a physics material with this friction
+    (static = dynamic) that wins over the one of the part touching them (friction combine mode `min`): 0.02 = oiled, a part slides down a sloped fixture.
+    Set before the physics starts. Returns the number of colliders."""
+    rx = [(re.compile(str(q)), float(f) if override is None else float(override), i) for i, (q, f) in enumerate(dict(patterns).items())]
+    n, mats = 0, []
+    for p in list(Usd.PrimRange(stage.GetPrimAtPath(root))):
+        hit = next(((f, i) for r, f, i in rx if r.fullmatch(p.GetName())), None)
+        if hit is None:
+            continue
+        f, i = hit
+        mat_path = f"/World/PhysicsMaterials/{name}_friction_{i}"                     # one material per machine and pattern: its friction can be changed while the simulation runs
+        if mat_path not in mats:
+            mats.append(mat_path)
+        if not stage.GetPrimAtPath(mat_path).IsValid():
+            UsdShade.Material.Define(stage, mat_path)
+            m = stage.GetPrimAtPath(mat_path)
+            pm = UsdPhysics.MaterialAPI.Apply(m)
+            pm.CreateStaticFrictionAttr(f)
+            pm.CreateDynamicFrictionAttr(f)
+            pm.CreateRestitutionAttr(0.0)
+            PhysxSchema.PhysxMaterialAPI.Apply(m).CreateFrictionCombineModeAttr("min")
+        mat = UsdShade.Material(stage.GetPrimAtPath(mat_path))
+        for q in Usd.PrimRange(p):
+            if q.IsA(UsdGeom.Mesh) and q.HasAPI(UsdPhysics.CollisionAPI):
+                UsdShade.MaterialBindingAPI.Apply(q).Bind(mat, UsdShade.Tokens.weakerThanDescendants, "physics")
+                n += 1
+    return n, mats
 
 
 def set_gripper_material(stage, links, gm):
@@ -810,6 +913,57 @@ def set_gripper_material(stage, links, gm):
             if gm.get(k) is not None:
                 m.CreateInput(k, Sdf.ValueTypeNames.Float).Set(float(gm[k]))
     return len(mats)
+
+
+def set_materials(stage, root, rules):
+    """materials: [{links: [regex], color: [r, g, b], metallic, roughness}, ...] of a robot yaml / a machine of map.yaml: the visual materials under the links whose prim
+    name matches get that look (real metal: colour, metallic 1, a low roughness = gloss). The converter turns the URDF colours into plastic-like materials. The rules are
+    applied in order and a link contains the links below it, so a rule for a link and then one for a part of it works. The instances under the links are made
+    editable first (only on this stage; the cached USD is unchanged). Returns the number of materials."""
+    count = 0
+    for rule in rules:
+        rx = [re.compile(str(q)) for q in rule["links"]]
+        roots = [p for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if any(r.fullmatch(p.GetName()) for r in rx)]
+        while True:                               # instances can be nested (instanced mesh -> instanced material)
+            inst = [p for r in roots for p in Usd.PrimRange(r) if p.IsInstance()]
+            if not inst:
+                break
+            for p in inst:
+                p.SetInstanceable(False)
+        mats = {UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial()[0].GetPath() for r in roots for p in Usd.PrimRange(r)
+                if p.IsA(UsdGeom.Gprim) and UsdGeom.Imageable(p).ComputePurpose() == UsdGeom.Tokens.default_}
+        mats.discard(Sdf.Path())
+        for mp in mats:
+            m = UsdShade.Material(stage.GetPrimAtPath(mp))
+            if rule.get("color") is not None:
+                m.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*(float(c) for c in rule["color"])))
+            for k in ("metallic", "roughness"):
+                if rule.get(k) is not None:
+                    m.CreateInput(k, Sdf.ValueTypeNames.Float).Set(float(rule[k]))
+        count += len(mats)
+    return count
+
+
+class PicturePanel:
+    """A window of Isaac Sim with the last picture of control/vision_pick.py (all parts with their score ranking, the best one marked): the path of every new picture comes on
+    /vision_pick/picture. It is made when the first picture arrives and comes back if it was closed."""
+
+    def __init__(self):
+        self.window = None
+        self.image = None
+        self.label = None
+
+    def show(self, path):
+        if self.window is None:
+            self.window = ui.Window("Vision pick: score ranking", width=760, height=700)
+            with self.window.frame:
+                with ui.VStack(spacing=4):
+                    self.label = ui.Label("", height=20)
+                    self.image = ui.Image("", fill_policy=ui.FillPolicy.PRESERVE_ASPECT_FIT)
+        self.image.source_url = path
+        self.label.text = os.path.basename(path)
+        self.window.visible = True
+        print(f"[INFO] picture window: {path}", flush=True)
 
 
 class MachineBridge(Node):
@@ -854,12 +1008,14 @@ class CarrierBridge(Node):
     of the loop comes back at the +y end. One topic controls it: std_msgs/Int32 on <topic>: n > 0 = advance n pitches (added to what is still to do),
     0 = stop where it is. <topic>/moving (std_msgs/Bool, latched) is True while the carriers are moving. The sim loop calls step() once per frame."""
 
-    def __init__(self, name, topic, joints, slots, window, speed):
+    def __init__(self, name, topic, joints, slots, window, speed, accel=None):
         super().__init__(f"{name}_carriers")
+        self.accel = float(accel) if accel else CARRIER_ACCEL    # m/s^2
         self.joints, self.slots, self.lo, self.hi = list(joints), [float(y) for y in slots], float(window[0]), float(window[1])
         self.loop = self.hi - self.lo                       # length of the loop = number of carriers x pitch
         self.pitch = self.loop / len(self.slots)
         self.speed = float(speed)                           # m/s
+        self.v = 0.0                                        # m/s now
         self.s = self.goal = 0.0                            # travelled (m, towards -y) and where it is going; multiples of the pitch = every carrier at a slot
         self.moving = False
         self._lock = threading.Lock()
@@ -885,7 +1041,11 @@ class CarrierBridge(Node):
         """advance by dt s of simulated time towards the goal; returns the joint positions"""
         with self._lock:
             if self.s < self.goal:
-                self.s = min(self.goal, self.s + self.speed * dt)
+                v = min(self.speed, self.v + self.accel * dt, math.sqrt(2.0 * self.accel * (self.goal - self.s)))    # up to speed, and slow enough to stop at the goal
+                self.v = max(v, 0.01)                                                                                      # (a creep, so that the goal is reached)
+                self.s = min(self.goal, self.s + self.v * dt)
+            else:
+                self.v = 0.0
             moving = self.s < self.goal
         if moving != self.moving:
             self.moving = moving
@@ -958,12 +1118,32 @@ def build_stage(usd_path, s, q0):
             crate = stage.DefinePrim(frame + "/crate")
             crate.GetReferences().AddReference(pc["crate"]["usd"])
             crate.RemoveAPI(UsdPhysics.RigidBodyAPI)       # the crate is a rigid body in its file: here it stands still (a static triangle mesh)
+            if s.get("pallet_physics") and not c["dynamic"]:   # pallets: of the speeds file: the crates of a layer with physics: false have no collider (not shown in the collision viewer, not cooked)
+                for q in Usd.PrimRange(crate):
+                    if q.HasAPI(UsdPhysics.CollisionAPI):
+                        UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
+            approx = str(pc["crate"].get("collision") or "none")   # collision of the crate mesh: meshSimplification | convexHull | convexDecomposition | none (the triangle mesh of the file, default)
+            if approx != "none":
+                for q in Usd.PrimRange(crate):
+                    if q.IsA(UsdGeom.Mesh) and q.HasAPI(UsdPhysics.CollisionAPI):
+                        UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr(approx)
         for p in pl["parts"]:                       # the parts of the top layers move (/World/pile: clickable like the pile), the ones below only fill the crates
             path = (f"/World/pile/{pname}_p{p['pallet']}_L{p['layer']}_C{p['crate']}_{p['j']:02d}" if p["dynamic"]
                     else f"/World/pallets/pallet_{p['pallet']}/L{p['layer']}_C{p['crate']}_{pname}_{p['j']:02d}")
-            place(path, pl["part_usd"], p["pos"], R=p["R"])
+            pos = list(p["pos"])
+            if p["dynamic"] and str(pc["crate"].get("collision", "none")) == "convexHull":   # the hull of a crate is solid up to its rim: the parts that move rest on top of it, not on the floor inside
+                pos[2] += float(pc["crate"]["size_m"][2]) - float(pc["crate"]["floor_z_m"])
+            place(path, pl["part_usd"], pos, R=p["R"])
+            if p["dynamic"] and p["layer"] >= int(pc.get("layers", 6)) - int(pc.get("sdf_layers", 0)):     # the parts the robot picks: their exact shape (SDF), set before the physics starts (a change of the collision type later restarts the physics)
+                gp = stage.GetPrimAtPath(f"{path}/geometry")
+                UsdPhysics.MeshCollisionAPI.Apply(gp).CreateApproximationAttr("sdf")
+                PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(gp).CreateSdfResolutionAttr(int(pc.get("sdf_resolution", 256)))
             if not p["dynamic"]:
                 stage.GetPrimAtPath(path).RemoveAPI(UsdPhysics.RigidBodyAPI)
+                if s.get("pallet_physics"):                    # pallets: of the speeds file: a layer with physics: false has no collision at all (not even a static one): the robot never gets there
+                    for q in Usd.PrimRange(stage.GetPrimAtPath(path)):
+                        if q.HasAPI(UsdPhysics.CollisionAPI):
+                            UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
     if s.get("map"):                              # environment made in the GUI: its top-level prims (not the render settings / cameras / lights its stage saved)
         layer = Sdf.Layer.FindOrOpen(s["map"])
         UsdGeom.Xform.Define(stage, "/World/map")
@@ -978,6 +1158,45 @@ def build_stage(usd_path, s, q0):
                     old.SetActive(False)
                 else:
                     print(f"[WARN] machine {m['name']}: {m['replaces']} not found in the map: the static copy stays", flush=True)
+    for mc_ in s.get("map_collision") or []:      # scene.map_collision: the collision of parts of the map (it is as made in the GUI otherwise): convexHull | convexDecomposition | meshSimplification | none (triangle mesh) | off = no collider
+        root = stage.GetPrimAtPath("/World/map/" + str(mc_["prim"]).strip("/"))
+        if not root.IsValid():
+            print(f"[WARN] map_collision: {mc_['prim']} not found in the map", flush=True)
+            continue
+        n = 0
+        for q in Usd.PrimRange(root):
+            if q.IsA(UsdGeom.Mesh) and q.HasAPI(UsdPhysics.CollisionAPI):
+                mode = str(mc_.get("collision", "convexHull"))
+                if mode == "off":
+                    UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
+                else:
+                    UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr(mode)
+                    if mode == "convexDecomposition":                        # options: {max_hulls, voxel_resolution, error_percentage, ...} as for the machines
+                        q.AddAppliedSchema("PhysxConvexDecompositionCollisionAPI")
+                        for key, value in (mc_.get("options") or {}).items():
+                            name, kind = DECOMPOSITION_ATTRS[key]
+                            q.CreateAttribute(f"physxConvexDecompositionCollision:{name}", getattr(Sdf.ValueTypeNames, kind)).Set({"Int": int, "Float": float, "Bool": bool}[kind](value))
+                n += 1
+        print(f"[INFO] map_collision: {mc_['prim']}: {n} collider(s) -> {mc_.get('collision', 'convexHull')}", flush=True)
+    for ed in s.get("map_edits") or []:           # scene.map_edits: parts of the map stretched in height: every vertex of the meshes below `prim` that is higher than above_z_m (world) moves up by dz_m
+        root = stage.GetPrimAtPath("/World/map/" + str(ed["prim"]).strip("/"))
+        if not root.IsValid():
+            print(f"[WARN] map_edits: {ed['prim']} not found in the map", flush=True)
+            continue
+        n = 0
+        for q in Usd.PrimRange(root):
+            if not q.IsA(UsdGeom.Mesh):
+                continue
+            mesh = UsdGeom.Mesh(q)
+            P = np.array(mesh.GetPointsAttr().Get(), dtype=np.float64)
+            M = np.array(UsdGeom.Xformable(q).ComputeLocalToWorldTransform(Usd.TimeCode.Default()), dtype=np.float64).T   # column vectors: world = M[:3,:3] p + M[:3,3]
+            W = P @ M[:3, :3].T + M[:3, 3]
+            W[W[:, 2] > float(ed["above_z_m"]), 2] += float(ed["dz_m"])
+            P2 = (W - M[:3, 3]) @ np.linalg.inv(M[:3, :3]).T
+            mesh.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(P2.astype(np.float32)))
+            mesh.GetExtentAttr().Set(Vt.Vec3fArray([Gf.Vec3f(*[float(v) for v in P2.min(0)]), Gf.Vec3f(*[float(v) for v in P2.max(0)])]))
+            n += 1
+        print(f"[INFO] map_edits: {ed['prim']}: {n} mesh(es) stretched by {ed['dz_m']} m above z {ed['above_z_m']} m", flush=True)
     if s.get("platform"):                         # pedestal: static box, pos_m = bottom centre
         pf = s["platform"]
         sx, sy, sz = (float(v) for v in pf["size_m"])
@@ -995,13 +1214,26 @@ def build_stage(usd_path, s, q0):
     if s["gripper_links"] and s.get("gripper_material"):
         n = set_gripper_material(stage, set(s["gripper_links"]), s["gripper_material"])
         print(f"[INFO] gripper material {dict(s['gripper_material'])} on {n} materials", flush=True)
+    if s.get("materials"):
+        n = set_materials(stage, ROBOT_PATH, s["materials"])
+        print(f"[INFO] materials of the robot: {n} set (metal look)", flush=True)
+    for m in s.get("machines") or []:
+        if m.get("materials"):
+            n = set_materials(stage, f"/World/machines/{m['name']}", m["materials"])
+            print(f"[INFO] machine {m['name']}: {n} materials set (metal look)", flush=True)
     if s.get("collision_decomposition"):
         n = set_collision_decomposition(stage, s["collision_decomposition"])
-        print(f"[INFO] collision_decomposition {list(s['collision_decomposition'])}: {n} colliders -> convexDecomposition", flush=True)
+        print(f"[INFO] collision_decomposition {dict(s['collision_decomposition']) if isinstance(s['collision_decomposition'], dict) else list(s['collision_decomposition'])}: "
+              f"{n} colliders -> convexDecomposition", flush=True)
     for m in s.get("machines") or []:
         if m.get("collision_decomposition"):
             n = set_collision_decomposition(stage, m["collision_decomposition"], f"/World/machines/{m['name']}")
             print(f"[INFO] machine {m['name']}: collision_decomposition {list(m['collision_decomposition'])}: {n} colliders -> convexDecomposition", flush=True)
+        if m.get("collision_friction"):
+            n, mats = set_collision_friction(stage, m["collision_friction"], f"/World/machines/{m['name']}", m["name"], m.get("friction_override"))
+            s.setdefault("friction_mats", {})[m["name"]] = mats
+            print(f"[INFO] machine {m['name']}: collision_friction {dict(m['collision_friction'])}"
+                  f"{' -> ' + str(m['friction_override']) + ' (fixtures of the speeds file)' if m.get('friction_override') is not None else ''}: {n} colliders", flush=True)
     if s.get("wrist_camera"):
         s["wrist_camera_path"] = make_wrist_camera(stage, s["wrist_camera"])
         if s["wrist_camera_path"]:
@@ -1030,13 +1262,14 @@ def build_stage(usd_path, s, q0):
     drives(ROBOT_PATH, s["joints"], q0, {"linear": k, "angular": k}, {"linear": d, "angular": d})
     for m in s.get("machines") or []:
         prefix = f"/World/machines/{m['name']}"
-        drives(prefix, m["joints"], m["q0"], MACHINE_STIFFNESS, MACHINE_DAMPING)
+        drives(prefix, m["joints"], m["q0"], MACHINE_STIFFNESS, {**MACHINE_DAMPING, **({"angular": float(m["rotor_damping"])} if m.get("rotor_damping") else {})})
         for p in Usd.PrimRange(stage.GetPrimAtPath(prefix)):    # the collision boxes of the frame overlap the rotors and jaws: their links must not collide with each other
             if p.HasAPI(UsdPhysics.ArticulationRootAPI):
                 PhysxSchema.PhysxArticulationAPI.Apply(p).CreateEnabledSelfCollisionsAttr().Set(False)
 
 
 def main():
+    globals().update(robot.get("sim_consts") or {})   # ARRIVE_TOL, SETTLE_FRAMES, GRIP_GRACE, GRIP_WINDOW from the speeds file
     rclpy.init(args=[])   # the command line (robot:=<name>, Isaac Lab flags) is not for ROS: rcl would read robot:=ur5e as a remap rule
     node = None
     try:
@@ -1071,6 +1304,15 @@ def main():
             try:
                 pc["plan"] = plan_pallet_crates(pc, os.path.join(REPO, "assets_cache"))
                 pl = pc["plan"]
+                phys = robot.get("pallet_physics") or {}
+                if phys:                                                            # physics per pallet and layer from the speeds file (pallets:): the parts of a layer with physics: false are fixed in their crates (static, no cost)
+                    def has_physics(pallet, layer, crate, default):             # the layer has physics, and (when `crates:` names some) this crate is one of them
+                        ph = phys.get((pallet, layer))
+                        return default if ph is None else (ph[0] and (ph[1] is None or crate in ph[1]))
+                    for c in pl["crates"]:
+                        c["dynamic"] = has_physics(c["pallet"], c["layer"], c["idx"], c["dynamic"])
+                    for p in pl["parts"]:
+                        p["dynamic"] = has_physics(p["pallet"], p["layer"], p["crate"], p["dynamic"])
                 n_dyn = sum(p["dynamic"] for p in pl["parts"])
                 print(f"[INFO] pallets: {len(pc['items'])} x {int(pc.get('layers', 6))} layers, {len(pl['crates'])} crates, {len(pl['parts'])} x "
                       f"{pc['part_cfg']['name']} ({n_dyn} movable in the top layer, seed {pc['seed']}); grids per layer (nx x ny): "
@@ -1145,9 +1387,21 @@ def main():
             mc["names"] = list(mc["art"].dof_names)
             mc["cmd"] = np.array([m["q0"].get(n, 0.0) for n in mc["names"]])
             mc["cmd0"] = mc["cmd"].copy()
-            mc["step"] = np.array([m["joints"][n][3] for n in mc["names"]]) * float(m.get("speed", 1.0)) / APP_HZ
+            mc["step"] = np.array([m["joints"][n][3] * next((f for rx, f in m.get("joint_speeds") or [] if re.fullmatch(rx, n)), float(m.get("speed", 1.0)))
+                                   for n in mc["names"]]) / APP_HZ
+            mc["vel"] = np.zeros(len(mc["names"]))                                  # velocity of the command (rad/s, m/s)
+            mc["rot"] = np.array([m["joints"][n][0] != "prismatic" for n in mc["names"]])
+            mc["acc"] = np.where(mc["rot"], float(m.get("accel_rot") or MACHINE_ACCEL["angular"]), float(m.get("accel_lin") or MACHINE_ACCEL["linear"]))
+            mc["mname"] = m["name"]
+            cap = {n: float(mc["step"][i] * APP_HZ) for i, n in enumerate(mc["names"]) if n.endswith(("flip_joint", "jaw_a_joint"))}     # what the speeds of the cell make of it (log)
+            print(f"[INFO] machine {m['name']}: speed caps (rad/s | m/s) {json.dumps({k: round(v, 3) for k, v in cap.items()})}; "
+                  f"acceleration rotors {float(m.get('accel_rot') or MACHINE_ACCEL['angular'])} rad/s2, jaws {float(m.get('accel_lin') or MACHINE_ACCEL['linear'])} m/s2; "
+                  f"rotor damping {float(m.get('rotor_damping') or MACHINE_DAMPING['angular'])} (speed limit by the drive force {300.0 / float(m.get('rotor_damping') or MACHINE_DAMPING['angular']):.0f} deg/s)", flush=True)
+            mc["q"] = mc["cmd"].copy()                                              # measured positions of the last frame
+            mc["carrier"] = np.zeros(len(mc["names"]), bool)                        # the joints of the belt: not driven by joint_command (set below)
             mc["node"] = MachineBridge(m["name"], mc["names"], mc["cmd"], [m["joints"][n][1:3] for n in mc["names"]])
             executor.add_node(mc["node"])
+            mc["last_target"] = mc["node"].targets()
             c = m.get("carriers")
             mc["carriers"] = None
             if c:
@@ -1155,9 +1409,10 @@ def main():
                 if bad:
                     print(f"[WARN] machine {m['name']}: carriers of map.yaml name joints that do not exist ({bad}): the carriers stay where they are", flush=True)
                 else:
-                    mc["carriers"] = {"node": CarrierBridge(m["name"], c.get("topic") or f"/{m['name']}/carriers", c["joints"], c["slots_m"], c["window_m"], c.get("speed_mps", 0.1)),
+                    mc["carriers"] = {"node": CarrierBridge(m["name"], c.get("topic") or f"/{m['name']}/carriers", c["joints"], c["slots_m"], c["window_m"], c.get("speed_mps", 0.1), c.get("accel_mps2")),
                                       "idx": [mc["names"].index(n) for n in c["joints"]]}
                     mc["carriers"]["last"] = mc["carriers"]["node"].positions()
+                    mc["carrier"][mc["carriers"]["idx"]] = True
                     executor.add_node(mc["carriers"]["node"])
                     cn = mc["carriers"]["node"]
                     print(f"[INFO] machine {m['name']}: carriers {c['joints']}: std_msgs/Int32 on {c.get('topic') or '/' + m['name'] + '/carriers'} (n > 0 = n pitches of {cn.pitch:.2f} m, "
@@ -1177,6 +1432,7 @@ def main():
         # panel (m, deg; read live from the physics, the panel itself may keep showing the start values). The event only remembers
         # the clicked parts, the pose is read in the loop below
         clicked, views = [], {}
+        picture_panel = PicturePanel()
         part_view = [None, None]                 # [RigidPrim over all parts of /World/pile, their paths]: the parts nearest to a /target_pose
 
         cmd0 = cmd.copy()                       # the start pose, where the arm is again after a restart of the physics
@@ -1211,7 +1467,7 @@ def main():
                 if paths and not clicked:
                     print(f"[INFO] {paths[0]} is not a part that can be picked (only the plates of the top layer / the objects move): no pose printed", flush=True)
         stage_sub = omni.usd.get_context().get_stage_event_stream().create_subscription_to_pop(on_stage_event, name="robot_sim click")
-        refined = {}     # part path -> its original max_convex_hulls, for the part that has CLICK_HULLS now (only one at a time)
+        refined = {}     # part path -> (its original max_convex_hulls, its original voxel resolution), for the part that has CLICK_HULLS / CLICK_VOXELS now (only one at a time)
 
         def set_click_physx(prim, stiff):
             """CLICK_PHYSX contact settings on the rigid body of a part: stiff = the clicked part, else the PhysX defaults"""
@@ -1220,21 +1476,34 @@ def main():
                 getattr(api, method)().Set(on if stiff else off)
 
         def refine_collision(path):
-            """The clicked part gets CLICK_HULLS convex hulls (PhysX cooks its collider again), the one clicked before goes back to its own number"""
+            """The clicked part gets CLICK_HULLS convex hulls on a CLICK_VOXELS voxel grid (PhysX cooks its collider again), the one clicked before goes back to its own"""
             stage_now = omni.usd.get_context().get_stage()
-            for old, n in list(refined.items()):
-                if old != path and stage_now.GetPrimAtPath(old).IsValid():
-                    stage_now.GetPrimAtPath(f"{old}/geometry").GetAttribute(HULLS_ATTR).Set(n)
+            for old, (n, voxels) in list(refined.items())[:max(0, len(refined) - CLICK_KEEP + 1)]:    # the parts the robot picked keep the fine collider: only the oldest beyond CLICK_KEEP go back
+                if old != path and n is None:                                # an SDF part: only its contact settings were changed
                     set_click_physx(stage_now.GetPrimAtPath(old), False)
-                    print(f"[INFO] {old}: back to {n} convex hulls", flush=True)
                     refined.pop(old)
+                elif old != path and stage_now.GetPrimAtPath(old).IsValid():
+                    geom = stage_now.GetPrimAtPath(f"{old}/geometry")
+                    geom.GetAttribute(HULLS_ATTR).Set(n)
+                    geom.CreateAttribute(VOXELS_ATTR, Sdf.ValueTypeNames.Int).Set(voxels)
+                    set_click_physx(stage_now.GetPrimAtPath(old), False)
+                    print(f"[INFO] {old}: back to {n} convex hulls, {voxels} voxels", flush=True)
+                    refined.pop(old)
+            if str(UsdPhysics.MeshCollisionAPI(stage_now.GetPrimAtPath(f"{path}/geometry")).GetApproximationAttr().Get()) == "sdf" and path not in refined:
+                refined[path] = (None, None)                                 # already its exact shape: nothing to cook, only the stiff contact settings
+                set_click_physx(stage_now.GetPrimAtPath(path), True)
+                print(f"[INFO] {path}: exact shape (SDF), stiff contact settings", flush=True)
+                return
             attr = stage_now.GetPrimAtPath(f"{path}/geometry").GetAttribute(HULLS_ATTR)
             if not attr.IsValid() or path in refined:
                 return                                                       # not a convex decomposition part, or already fine
-            refined[path] = int(attr.Get())
+            geom = stage_now.GetPrimAtPath(f"{path}/geometry")
+            voxels = geom.GetAttribute(VOXELS_ATTR)
+            refined[path] = (int(attr.Get()), int(voxels.Get()) if voxels.IsValid() and voxels.Get() else VOXELS_DEFAULT)
             attr.Set(CLICK_HULLS)
+            geom.CreateAttribute(VOXELS_ATTR, Sdf.ValueTypeNames.Int).Set(CLICK_VOXELS)
             set_click_physx(stage_now.GetPrimAtPath(path), True)
-            print(f"[INFO] {path}: {CLICK_HULLS} convex hulls instead of {refined[path]} (the collider is cooked again, this can take a moment)", flush=True)
+            print(f"[INFO] {path}: {CLICK_HULLS} convex hulls instead of {refined[path][0]}, {CLICK_VOXELS} voxels instead of {refined[path][1]} (the collider is cooked again, this can take a moment)", flush=True)
 
         def refine_target(pos):
             """The part the robot is sent to (/target_pose = the TCP = the part's centre) gets what a clicked part gets: the exact collider (CLICK_HULLS) and the
@@ -1258,13 +1527,86 @@ def main():
         print("[INFO] click a part in the viewport: its pose is printed as x y z roll pitch yaw (m, deg, like the Property panel), (= the target of a sequence with `target: object`), and below it the TCP pose that grips it "
               "(compute_grasp_tcp_pose.py) and the state of the part (standard | turn_over) for ik_node / a sequence with `target: tcp`, to paste into ee_6d.py", flush=True)
 
+        fx_state = {"t": 0.0, "mtime": os.path.getmtime(robot["speeds_path"]) if robot.get("speeds_path") and os.path.isfile(robot["speeds_path"]) else 0.0,
+                    "fx": dict(robot.get("fixtures") or {}), "last": {}}
+
+        def fixture_friction():
+            """the friction of the jigs of a machine whose belt / chain moves is `friction_moving` (the plates ride along), at rest `friction` (a plate slides down the prongs into the windows)"""
+            st = omni.usd.get_context().get_stage()
+            for mc in machines:
+                car, name = mc.get("carriers"), mc.get("mname")
+                if not car or name not in (robot.get("friction_mats") or {}):
+                    continue
+                moving = bool(car["node"].moving)
+                if fx_state["last"].get(name) == moving:
+                    continue
+                fx_state["last"][name] = moving
+                cfg = fx_state["fx"].get(name) or {}
+                v = cfg.get("friction_moving", cfg.get("friction")) if moving else cfg.get("friction")
+                if v is None:
+                    continue
+                for mp in robot["friction_mats"][name]:
+                    api = UsdPhysics.MaterialAPI(st.GetPrimAtPath(mp))
+                    api.GetStaticFrictionAttr().Set(float(v))
+                    api.GetDynamicFrictionAttr().Set(float(v))
+                print(f"[INFO] friction of the jigs of {name}: {float(v):g} ({'moving' if moving else 'at rest'})", flush=True)
+
+        def reload_fixtures():
+            """fixtures: of the speeds file (side_plate.yaml) again when the file has changed: the friction of the jigs is changed while the simulation runs (a material attribute, no restart)"""
+            path = robot.get("speeds_path")
+            if not path or not os.path.isfile(path) or os.path.getmtime(path) == fx_state["mtime"]:
+                return
+            fx_state["mtime"] = os.path.getmtime(path)
+            try:
+                fx_state["fx"] = (yaml.safe_load(open(path)) or {}).get("fixtures") or {}
+                fx_state["last"].clear()                                   # fixture_friction() sets the new values in the next frame
+                print(f"[INFO] fixtures of {os.path.basename(path)} read again (no restart): {json.dumps(fx_state['fx'])}", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[WARN] fixtures of {path} not read: {type(e).__name__}: {e}", flush=True)
+
         rebuilds = 0
         while simulation_app.is_running():
+            if time.time() - fx_state["t"] > 1.0:
+                fx_state["t"] = time.time()
+                reload_fixtures()
+            fixture_friction()
+            near = robot.get("part_pose_near") or [None]
+            hands_ = robot.get("hand_slots") or {}
+            if (near[0] is not None or hands_.get("slots_xy")) and time.time() - fx_state.get("tp", 0.0) > 0.2:
+                fx_state["tp"] = time.time()
+                try:
+                    if fx_state.get("pile") is None:                       # all parts of the pile in one view (the ones the robot can have put at the standard coordinate)
+                        st_ = omni.usd.get_context().get_stage()
+                        fx_state["pile"] = RigidPrim([str(q.GetPath()) for root_ in ("/World/pile", "/World/objects") if st_.GetPrimAtPath(root_).IsValid() for q in st_.GetPrimAtPath(root_).GetChildren()])
+                    pos_, quat_ = fx_state["pile"].get_world_poses()
+                    pn, qn = pos_.numpy(), quat_.numpy()
+                    if hands_.get("slots_xy"):                              # a bit per hand pair: a plate (flat on its jig, z in the range) within `radius` of the place in front of the pair
+                        zlo, zhi = (float(v) for v in hands_.get("z", [0.9, 1.2]))
+                        mask = 0
+                        for i, (hx, hy) in enumerate(hands_["slots_xy"]):
+                            if np.any((np.hypot(pn[:, 0] - float(hx), pn[:, 1] - float(hy)) < float(hands_.get("radius", 0.03))) & (pn[:, 2] > zlo) & (pn[:, 2] < zhi)):
+                                mask |= 1 << i
+                        node._hand_pub.publish(Int32(data=int(mask)))
+                    d = np.hypot(pn[:, 0] - float(near[0] or 0.0), pn[:, 1] - float(near[1] or 0.0)) if near[0] is not None else np.array([9.0])
+                    k = int(np.argmin(d))
+                    if d[k] < 0.08:                                         # a plate lies at the standard coordinate: its pose (position + yaw) for the transfer; none there: nothing is published
+                        node.publish_part_pose(pn[k], qn[k])
+                except Exception:  # noqa: BLE001
+                    fx_state["pile"] = None
             cmd = cmd + np.clip(np.array(node.targets(cmd, step)) - cmd, -step, step)  # rate-limited towards the command
             try:
                 art.set_dof_position_targets(cmd)
                 for mc in machines:
-                    mc["cmd"] = mc["cmd"] + np.clip(mc["node"].targets() - mc["cmd"], -mc["step"], mc["step"])
+                    target = mc["node"].targets()
+                    new = target != mc["last_target"]                                       # a new command: the move starts from where the joint really is (a joint that was held
+                    mc["cmd"] = np.where(new & ~mc["carrier"], mc["q"], mc["cmd"])          # against something has its command far ahead of it: no waiting, then a jump)
+                    mc["vel"] = np.where(new, 0.0, mc["vel"])
+                    mc["last_target"] = target
+                    err = target - mc["cmd"]                                               # towards the commanded position on a velocity ramp
+                    v_want = np.sign(err) * np.minimum(mc["step"] * APP_HZ, np.sqrt(2.0 * mc["acc"] * np.abs(err)))
+                    mc["vel"] = mc["vel"] + np.clip(v_want - mc["vel"], -mc["acc"] / APP_HZ, mc["acc"] / APP_HZ)
+                    mc["cmd"] = mc["cmd"] + np.clip(mc["vel"] / APP_HZ, -np.abs(err), np.abs(err))
+                    mc["cmd"] = np.where(mc["rot"], np.clip(mc["cmd"], mc["q"] - MACHINE_LEAD, mc["q"] + MACHINE_LEAD), mc["cmd"])    # a held rotor does not wind up
                     if mc["carriers"]:                                        # the carriers follow the belt, not joint_command
                         cr = mc["carriers"]
                         q = cr["node"].step(1.0 / APP_HZ)
@@ -1279,7 +1621,8 @@ def main():
                 update(1)
                 node.report(art.get_dof_positions().numpy()[0], art.get_dof_velocities().numpy()[0])
                 for mc in machines:
-                    mc["node"].report(mc["art"].get_dof_positions().numpy()[0], mc["art"].get_dof_velocities().numpy()[0])
+                    mc["q"] = mc["art"].get_dof_positions().numpy()[0]
+                    mc["node"].report(mc["q"], mc["art"].get_dof_velocities().numpy()[0])
                 rebuilds = 0
             except Exception as e:  # noqa: BLE001
                 rebuilds += 1
@@ -1311,6 +1654,13 @@ def main():
                     node.publish_turned_over(flipped)
                 except Exception as e:
                     print(f"[WARN] pose of {path} not available: {type(e).__name__}: {e}", flush=True)
+            while node.pictures:                                             # /vision_pick/picture: show the newest one in a window of Isaac Sim
+                path = node.pictures.popleft()
+                if not node.pictures and os.path.isfile(path):
+                    try:
+                        picture_panel.show(path)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[WARN] picture {path} not shown: {type(e).__name__}: {e}", flush=True)
             while node.targets_seen:                                         # /target_pose: the part the robot goes to
                 pos = node.targets_seen.popleft()
                 try:

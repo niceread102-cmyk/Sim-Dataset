@@ -3,7 +3,7 @@ name: side_plate
 mesh: ../../../assets/objects/stl/SIDE-PLATE.stl   # 55.6 x 55.6 x 20.9 mm, not watertight (PhysX warns)
 units: mm
 recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
-mass_kg: 0.1331       # volume 17.0 cm^3 x 7.85 g/cm^3
+mass_kg: 0.047        # the real part weighs 47 g (the volume 17.0 cm^3 x 7.85 g/cm^3 = 133 g is the solid CAD block)
 friction: 0.5
 restitution: 0.0
 # physx (stiff contact for a finger pushing hard on the thin 2-3 mm hole wall): robot_sim.py CLICK_PHYSX applies it to the clicked part only. On every part (~120 free ones) it made the sim crawl.
