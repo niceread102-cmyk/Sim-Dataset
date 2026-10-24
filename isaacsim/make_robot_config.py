@@ -2,16 +2,17 @@
 """Config files of a new robot from its URDF: the simulation yaml and the whole MoveIt bringup folder.
 
     python3 make_robot_config.py robot:=hdr50_22 [--ee-link tool0] [--tcp 0 0 0.15] [--seed 0 30 -60 0 45 0]
-                                 [--select] [--force] [--no-check] [--out DIR]
+                                 [--force] [--no-check] [--out DIR]
 
-Input   assets/robot/<name>/urdf/<name>.urdf   (meshes relative to it, e.g. ../meshes/visual/base.stl). <name> is the name of the URDF FILE: a
+Input   assets/robot/<name>/urdf/<name>.urdf   (meshes relative to it, e.g. ../meshes/visual/base.stl, or package://<pkg>/... found in the URDF
+        folder or a folder above it, as xacro writes them). <name> is the name of the URDF FILE: a
         robot with several URDFs in one folder (m20_35_18d.urdf, m20_35_18d_jegg2510n.urdf with the gripper) is one robot per file:
         robot:=m20_35_18d_jegg2510n makes its own yaml and bringup folder, the arm-only m20_35_18d stays as it is.
-Output  isaacsim/configs/robots/<name>.yaml        sim: name, start pose, stiffness, damping, speed, controller
+Output  isaacsim/configs/robot/<name>.yaml        name, start pose, stiffness, damping, speed, MoveIt speed and joint limits, controller
         bringup/<name>/config/                      <name>.srdf, kinematics, joint_limits, ompl_planning, moveit_controllers, ik_node
         bringup/<name>/rviz/demo.rviz
-then       lab robot_sim.py robot:=<name>                 (Isaac Sim side, the joint drive force limit is the URDF effort)
-           ros2 launch robot.launch.py robot:=<name>      (bringup/integration/launch: MoveIt + ik_node)
+then       lab robot_sim.py robot:=<name> [map:=<map>]                 (Isaac Sim side, the joint drive force limit is the URDF effort)
+           ros2 launch robot.launch.py robot:=<name> [map:=<map>]      (bringup/integration/launch: MoveIt + ik_node)
 
 What comes from the URDF: the base link (below the empty `world` root), the arm joints from there to the end frame, their velocity
 limits (acceleration = --accel-factor x velocity: MoveIt's time parametrization needs one), the robot name of the SRDF, the links
@@ -26,15 +27,15 @@ Chosen here (override with the options):
   ready pose  --seed (deg): start pose of the sim = IK seed = home of the SRDF. Default: the best pose found by forward kinematics
               (tool pointing down, in front of the robot, elbow up, away from joint limits and singularities) that MoveIt accepts.
   sim drives  stiffness 20000 N*m/deg, damping 1000, speed 0.3 (the values of m20_35_18d): tune them in the sim.
+  MoveIt      velocity_scaling 0.15, acceleration_scaling 0.05, no narrower joint limits (joint_limits_deg {}): change them in the robot yaml.
 The MoveIt check (isolated ROS domain, needs ROS sourced; --no-check skips it) finds the link pairs that collide in every pose
 (meshes that overlap at the joints), turns their collision check off, and takes the first ready pose that is collision free.
 Files that already exist are kept (--force overwrites them) except joint_limits.yaml: it holds nothing but what the URDF says, so
 every run writes it again from the URDF (velocity limits, acceleration, the position ranges in the comment on top). An existing
 robot yaml is read (controller, joint_pos).
---select makes it the robot of configs/map/map.yaml (scene.robot, the one `lab robot_sim.py` and `robot.launch.py` start).
 --out DIR writes everything below DIR instead of the project (no check).
 Nothing else has to be registered: run_isaacsim.py, robot_sim.py, robot.launch.py and control/robot_sequence.py find the robot by its
-files (configs/robots/<name>.yaml, bringup/<name>/).
+files (configs/robot/<name>.yaml, bringup/<name>/). The robot stands at the origin; a map puts it somewhere else (scene.robot_pose).
 """
 import argparse
 import math
@@ -52,11 +53,12 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+import sim_config
+
 HERE = Path(__file__).resolve().parent                    # Simulation/isaacsim
 SIM_DIR = HERE.parent                                     # Simulation
-ASSETS_DIR = SIM_DIR / "assets" / "robot"
 BRINGUP_DIR = SIM_DIR / "bringup"
-ROBOTS_DIR = HERE / "configs" / "robots"
+ROBOTS_DIR = HERE / "configs" / "robot"
 LAUNCH = BRINGUP_DIR / "integration" / "launch" / "robot.launch.py"
 GROUP = "arm"                                             # planning group of every robot
 MOVABLE = ("revolute", "continuous", "prismatic")
@@ -254,8 +256,7 @@ class Urdf:
 
 def find_urdf(name: str):
     """assets/robot/<name>/urdf/<name>.urdf, or <name>.urdf in another assets/robot/*/urdf/ folder (several URDFs of one robot share a folder)."""
-    own = ASSETS_DIR / name / "urdf" / f"{name}.urdf"
-    return own if own.is_file() else next(iter(sorted(ASSETS_DIR.glob(f"*/urdf/{name}.urdf"))), own)
+    return Path(sim_config.find_urdf(name))
 
 
 # ---------------------------------------------------------------- ready pose
@@ -442,7 +443,7 @@ planner_configs:
 def controllers_text(name, controller, arm) -> str:
     joints = "\n".join(f"      - {j}" for j in arm)
     return f"""# {name}: generated by isaacsim/make_robot_config.py. The FollowJointTrajectory action server is provided by isaacsim/robot_sim.py
-# (controller: of configs/robots/{name}.yaml). The action name is "<controller name>/<action_ns>", here
+# (controller: of configs/robot/{name}.yaml). The action name is "<controller name>/<action_ns>", here
 # /{controller}/follow_joint_trajectory.
 moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
 
@@ -466,7 +467,7 @@ moveit_simple_controller_manager:
 def ik_node_text(name, base, ee, arm, tcp, seed_deg, wrap) -> str:
     fmt = lambda v: "[" + ", ".join(f"{x:g}" for x in v) + "]"
     return f"""# Parameters of control/ik_node.py for {name} (generated by isaacsim/make_robot_config.py).
-base_frame: {base}   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts pos_m / rpy_deg of configs/robots/{name}.yaml into MoveIt's URDF)
+base_frame: {base}   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts where the robot stands in the map, scene.robot_pose, into MoveIt's URDF)
 group_name: {GROUP}                   # config/{name}.srdf
 ee_link: {ee}                    # z axis = tool direction, so rpy (180, 0, 0) = tool pointing down
 arm_joints: [{", ".join(arm)}]
@@ -477,12 +478,7 @@ tcp_offset: {fmt(tcp)}            # m, TCP (gripper tip) in the ee_link frame
 # first IK of control/robot_sequence.py).
 ik_seed_deg: {fmt(seed_deg)}
 
-# Speed: fraction of the limits MoveIt uses (velocity from the URDF, acceleration from config/joint_limits.yaml)
-velocity_scaling: 0.15
-acceleration_scaling: 0.05
-
-# Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused.
-joint_limits_deg: {{}}
+# Speed (velocity_scaling, acceleration_scaling) and narrower joint limits (joint_limits_deg) are the robot's: isaacsim/configs/robot/{name}.yaml
 
 {wrap_joints_text(wrap)}"""
 
@@ -492,16 +488,19 @@ def sim_yaml_text(name, urdf_rel, controller, home, stiffness, damping, speed, g
     grip = (f"gripper_joints: [{', '.join(gripper)}]        # joints of the URDF that /gripper/command drives (0 = lower limit, 1 = upper limit; mimic joints follow)\n"
             if gripper else "")
     return f"""# lab robot_sim.py robot:={name}    (URDF: ../../../{urdf_rel}, MoveIt: ros2 launch robot.launch.py robot:={name})
-# Generated by isaacsim/make_robot_config.py. Only the robot is here: the scene (bin, pile, basket, objects) is configs/map/map.yaml.
+# Generated by isaacsim/make_robot_config.py. Only the robot is here, the same in every map: what stands around it is the map (configs/map/<map>.yaml, map:=<map>).
 name: {name}
 gripper: none
-{grip}pos_m: [0.0, 0.0, 0.0]            # robot base in the world (m)
+{grip}pos_m: [0.0, 0.0, 0.0]            # mount of the robot base (m) = 0 for every robot: where it stands in a map is scene.robot_pose of the map
 rpy_deg: [0, 0, 0]
 joint_pos: {{{start}}}
                                   # start pose (rad) = the ready pose = ik_seed_deg of bringup/{name}/config/ik_node.yaml
 stiffness: {stiffness:g}                  # joint drives, N*m/deg (prismatic: N/m). Higher = less sag. The force limit is the URDF effort
 damping: {damping:g}                     # higher = less swinging, slower settling
 speed: {speed:g}                        # max joint speed = speed x URDF velocity limit
+velocity_scaling: 0.15            # MoveIt (ik_node.py, robot_sequence.py): share of the joint velocity limits the motions use (1.0 = full)
+acceleration_scaling: 0.05        # MoveIt: share of the acceleration limits (bringup/<robot>/config/joint_limits.yaml)
+joint_limits_deg: {{}}              # narrower position range per joint than the URDF (deg), e.g. {{J1: [-90, 90]}}: MoveIt plans and solves the IK inside it (the start pose has to be inside too)
 physics_hz: 60                    # physics steps per simulated second
 controller: /{controller}  # <controller>/joint_trajectory, <controller>/follow_joint_trajectory (bringup/{name}/config/moveit_controllers.yaml)
 """
@@ -596,7 +595,6 @@ def main():
     ap.add_argument("--damping", type=float, default=1000.0, help="sim drive damping")
     ap.add_argument("--speed", type=float, default=0.3, help="sim max joint speed = speed x URDF velocity limit")
     ap.add_argument("--accel-factor", type=float, default=2.0, help="MoveIt max acceleration = this x max velocity")
-    ap.add_argument("--select", action="store_true", help="make it the robot of configs/map/map.yaml (scene.robot)")
     ap.add_argument("--force", action="store_true", help="overwrite files that exist")
     ap.add_argument("--no-check", action="store_true", help="no MoveIt check (collision pairs, collision free ready pose)")
     ap.add_argument("--out", type=Path, help="write below this folder instead of the project (no check)")
@@ -606,10 +604,19 @@ def main():
     urdf_path = find_urdf(name)
     if not urdf_path.is_file():
         sys.exit(f"URDF not found: assets/robot/{name}/urdf/{name}.urdf (or {name}.urdf in another assets/robot/*/urdf/)")
-    miss = [m.get("filename") for m in ET.parse(urdf_path).getroot().iter("mesh")
-            if "://" in m.get("filename") or not (urdf_path.parent / m.get("filename")).is_file()]
+    tree = ET.parse(urdf_path)                  # mesh paths of xacro (package://...) -> paths relative to the urdf folder, written back into the URDF
+    fixed = 0
+    for m in tree.getroot().iter("mesh"):
+        found = sim_config.find_mesh(m.get("filename"), str(urdf_path.parent))
+        if found and "://" in m.get("filename", ""):
+            m.set("filename", os.path.relpath(found, urdf_path.parent))
+            fixed += 1
+    if fixed:
+        tree.write(urdf_path, encoding="utf-8", xml_declaration=True)
+        print(f"[INFO] {fixed} mesh path(s) of {urdf_path.name} set relative to the urdf folder (e.g. ../meshes/visual/...)", flush=True)
+    miss = [m.get("filename") for m in tree.getroot().iter("mesh") if not sim_config.find_mesh(m.get("filename"), str(urdf_path.parent))]
     if miss:
-        sys.exit(f"{len(miss)} mesh(es) of {urdf_path.name} not found relative to the urdf folder, e.g. {miss[0]}")
+        sys.exit(f"{len(miss)} mesh(es) of {urdf_path.name} not found (relative to the urdf folder, or package:// in it or a folder above it), e.g. {miss[0]}")
     urdf = Urdf(urdf_path)
     base = urdf.base_link()
     ee = args.ee_link or urdf.default_ee_link(base)
@@ -632,7 +639,7 @@ def main():
     efforts = [float(j.find("limit").get("effort", 0)) if j.find("limit") is not None else 0.0 for j in movable]
 
     root = args.out or SIM_DIR
-    yaml_file = (root / "configs" / "robots" if args.out else ROBOTS_DIR) / f"{name}.yaml"
+    yaml_file = (root / "configs" / "robot" if args.out else ROBOTS_DIR) / f"{name}.yaml"
     cfg_dir = root / "bringup" / name / "config"
     files = {"sim": yaml_file, "srdf": cfg_dir / f"{name}.srdf", "kin": cfg_dir / "kinematics.yaml", "lim": cfg_dir / "joint_limits.yaml",
              "ompl": cfg_dir / "ompl_planning.yaml", "ctrl": cfg_dir / "moveit_controllers.yaml", "ik": cfg_dir / "ik_node.yaml",
@@ -734,15 +741,6 @@ def main():
     print("files:")
     for k, f in files.items():
         print(f"  {'written' if made.get(k) else 'kept   '}  {f if args.out else os.path.relpath(f, SIM_DIR)}")
-    if args.select and not args.out:
-        sel = HERE / "configs" / "map" / "map.yaml"
-        text = sel.read_text()
-        new, n = re.subn(r"(?m)^(  robot:[ \t]*)\S+", lambda mo: mo.group(1) + name, text, count=1)     # the `robot:` line of `scene:`, comment kept
-        if n:
-            sel.write_text(new)
-            print(f"scene.robot: {name} in {os.path.relpath(sel, SIM_DIR)}")
-        else:
-            print(f"[WARN] no `robot:` line under scene: in {os.path.relpath(sel, SIM_DIR)}: add `  robot: {name}` there")
     if not args.out:
         print(f"next:  lab robot_sim.py robot:={name}     |     cd bringup/integration/launch && ros2 launch robot.launch.py robot:={name}")
 

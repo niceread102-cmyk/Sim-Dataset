@@ -1,5 +1,5 @@
 # Parameters of control/ik_node.py for the FANUC M-20iD/35 (python3 control/ik_node.py --config bringup/m20_35_18d/config/ik_node.yaml).
-base_frame: world   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts pos_m / rpy_deg of configs/robots/<name>.yaml into MoveIt's URDF)
+base_frame: world   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts where the robot stands in the map, scene.robot_pose, into MoveIt's URDF)
 group_name: arm                   # config/m20_35_18d.srdf
 ee_link: fanuc_flange             # the flange front-face frame (z axis = tool direction), so rpy (180, 0, 0) = tool pointing down
 arm_joints: [J1, J2, J3, J4, J5, J6]
@@ -13,17 +13,11 @@ tcp_offset: [0.0, 0.0, 0.469316]
 # first IK of control/robot_sequence.py).
 ik_seed_deg: [0, 0, 0, 0, -90, 0]
 
-# Speed: fraction of the limits MoveIt uses (config/joint_limits.yaml: 180/180/200/350/350/400 deg/s)
-velocity_scaling: 0.15
-acceleration_scaling: 0.05
-
-# Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused. Example:
-# joint_limits_deg: {J1: [-150, 150], J5: [-120, 120]}
-joint_limits_deg: {}
+# Speed (velocity_scaling, acceleration_scaling) and narrower joint limits (joint_limits_deg) are the robot's: isaacsim/configs/robot/m20_35_18d.yaml
 
 # Joints that can turn more than a full turn (position range wider than 360 deg in the URDF) and that range (deg). The IK can
 # return the angle of such a joint a full turn off (q +- 360) and the arm would spin once round to reach it: ik_node sends the
-# equivalent angle nearest to the current one (inside this range and joint_limits_deg). Joints not listed are sent as solved.
+# equivalent angle nearest to the current one (inside this range and joint_limits_deg of the robot yaml). Joints not listed are sent as solved.
 wrap_joints_deg:
   J4: [-200, 200]
   J6: [-450, 450]

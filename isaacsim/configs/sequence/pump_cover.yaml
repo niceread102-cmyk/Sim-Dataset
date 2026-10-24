@@ -1,4 +1,4 @@
 # robot_sequence.py for the pump cover map (PUMP_COVER_MAP): the same task as the side plate map (same pallets, same place poses), another part and box.
-#   ros2 launch robot.launch.py robot:=<robot> sequence:=pump_cover
+#   ros2 launch robot.launch.py map:=PUMP_COVER_MAP [robot:=<robot>] sequence:=pump_cover
 # Change here what differs for the pump cover (place poses, via, approach distance, ...): the rest is side_plate.yaml.
 extends: side_plate

@@ -1,11 +1,12 @@
 """Capture -> 6D pose -> pick: the part with the highest score of the wrist camera image is sent to the robot as the next target.
 
-    python3 control/vision_pick.py [--dry-run] [--loop] [--robot <name>]
+    python3 control/vision_pick.py [--dry-run] [--loop] [--robot <name>] [--map <map>]
 
 What it does (the steps you would do by hand):
   1. publishes std_msgs/Empty on /wrist_camera/capture: robot_sim.py writes one RGB + depth frame to wrist_camera.output_dir of the robot yaml
   2. copies only that new frame into a work folder and runs gdrnpp's camera_convert_data.py --to-bop and infer.py on it (its own .venv python)
-  3. reads <frame>_pose6d.json: the confident poses, sorted by score, highest first; the best one is the part to pick
+  3. reads <frame>_pose6d.json: the confident poses of the crate under the camera, best first (pick_filter.py: `crate:` of the sequence yaml = an ROI that is
+     blacked out around before the pose network runs; then lying flat, the highest, the nearest to the crate centre); the best one is the part to pick
   4. saves a picture of all parts with their labels, boxes and the score ranking (the best one marked) in runs/vision_pick/ (--blur n blurs the parts) and publishes its path on /vision_pick/picture:
      robot_sim.py shows it in a window of Isaac Sim
   5. publishes its state on /part_turned_over (std_msgs/Bool, True = turned over, latched: the sequence takes the place pose from it) and its pose on
@@ -29,18 +30,21 @@ import tempfile
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import rclpy
-import yaml
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from scipy.spatial import ConvexHull
 from geometry_msgs.msg import Pose
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
-from std_msgs.msg import Bool, Empty, String
+from std_msgs.msg import Bool, Empty, Int32, String
 
 SIM_DIR = Path(__file__).resolve().parent.parent                       # Simulation/
+sys.path.insert(0, str(SIM_DIR / 'isaacsim'))
+import sim_config  # noqa: E402  the maps and robots of isaacsim/configs/
+from pick_filter import mask_outside, rank, roi_polygon  # noqa: E402
 GDRNPP = Path.home() / 'project' / 'gdrnpp_bin_6DOF_estimation'
 MODELS = Path.home() / 'IsaacSim' / 'captures' / 'side_plate_10k' / 'shard_00' / 'models'    # CAD models copied by --to-bop (the part of the pose network)
 OUT_DIR = GDRNPP / 'runs' / 'vision_pick'                              # the pictures and the poses of every capture
@@ -51,15 +55,36 @@ TOPIC_PICTURE = '/vision_pick/picture'                                 # std_msg
 TIMEOUT = {'capture': 180.0, 'pipeline': 1200.0, 'sequence': 1800.0, 'transfer': 1800.0}   # s: frame written by the simulation, convert + infer, one pick and place
 
 
-def camera_dir(robot=None):
-    """wrist_camera.output_dir of the robot yaml (the folder robot_sim.py writes the frames to)"""
-    scene = (yaml.safe_load(open(SIM_DIR / 'isaacsim' / 'configs' / 'map' / 'map.yaml')) or {}).get('scene') or {}
-    name = robot or scene.get('robot')
-    cfg = yaml.safe_load(open(SIM_DIR / 'isaacsim' / 'configs' / 'robots' / f'{name}.yaml')) or {}
+def camera_dir(robot=None, map_name=None):
+    """wrist_camera.output_dir of the robot yaml (the folder robot_sim.py writes the frames to); robot = --robot, else scene.robot of the map"""
+    try:
+        robot, map_name = sim_config.with_current(robot, map_name)          # without --robot / --map: the ones of the running robot_sim.py
+        name = sim_config.pick_robot(robot, sim_config.scene_of(map_name))
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    cfg = sim_config.load_robot(name)
     out = (cfg.get('wrist_camera') or {}).get('output_dir')
     if not out:
         raise SystemExit(f'robot {name}: no wrist_camera.output_dir in its yaml')
     return Path(os.path.expanduser(str(out)))
+
+
+def crate_of(robot=None, map_name=None):
+    """(`crate:`, `crates:`) of the sequence of the map (robots.<robot>.<key>, else <key>): the ROI of pick_filter.py and the crates emptied in turn,
+    for every layer of the stack (sim_config.expand_crates: each {centre, home, floor_z, level}); (None, []) = the whole image"""
+    try:
+        robot, map_name = sim_config.with_current(robot, map_name)
+        scene = sim_config.scene_of(map_name)
+        name = sim_config.pick_robot(robot, scene)
+    except ValueError:
+        return None, []
+    path = Path(sim_config.SEQUENCE_DIR) / f"{scene.get('sequence')}.yaml"
+    if not scene.get('sequence') or not path.is_file():
+        return None, []
+    cfg = sim_config._load_yaml_tree(str(path))
+    mine = (cfg.get('robots') or {}).get(name) or {}
+    crate = mine.get('crate') or cfg.get('crate')
+    return crate, sim_config.expand_crates(crate, mine.get('crates') or cfg.get('crates') or [])
 
 
 def frames(folder):
@@ -155,8 +180,11 @@ def draw_ranking(rgb, poses, ranked, K, corners, title, top_n=5, blur=9.0):
 
 
 class VisionPick(Node):
-    def __init__(self):
+    def __init__(self, crate=None, crates=()):
         super().__init__('vision_pick')
+        self.crates, self.idx = list(crates), 0                         # crates: of the sequence, emptied in turn: the one now
+        self.crate = {**crate, 'centre': self.crates[0]['centre'], 'floor_z': self.crates[0]['floor_z']} if crate and self.crates else crate   # pick_filter.py: the crate under the camera (None = the whole image)
+        self.empty = False                                              # the last capture found nothing: the crate is empty
         self.done = None                                                # last /sequence_done (state of the part) not yet used
         self.last_xy = None                                             # x y of the part that was sent to the robot
         self.failed = []                                                # x y of the parts whose pick failed
@@ -168,6 +196,17 @@ class VisionPick(Node):
         self.create_subscription(String, TOPIC_DONE, self.cb_done, 10)
         self.transfer_done = False                                      # /transfer_done (std_msgs/Empty): the plate lies on the belt and the arm is at home again = the last step of a pick
         self.create_subscription(Empty, TOPIC_TRANSFER, lambda _: setattr(self, 'transfer_done', True), 10)
+        self.clear_topic = (crate or {}).get('clear_topic')            # crate.clear_topic of the sequence yaml: std_msgs/String (latched) when the crate is empty
+        self.clear_pub = self.create_publisher(String, self.clear_topic, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                                                                   durability=DurabilityPolicy.TRANSIENT_LOCAL)) if self.clear_topic else None
+        nxt, ready = (crate or {}).get('next_topic'), (crate or {}).get('ready_topic')   # the next crate: robot_sequence.py goes to its scan pose and says when it is there
+        self.next_pub = self.create_publisher(Int32, nxt, 10) if nxt and len(self.crates) > 1 else None
+        active = (crate or {}).get('active_topic')                      # robot_sim.py: physics only for the crate picked from now (map: pallets.physics switch)
+        self.active_pub = self.create_publisher(String, active, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                                                           durability=DurabilityPolicy.TRANSIENT_LOCAL)) if active and self.crate and 'centre' in self.crate else None
+        self.crate_ready = None
+        if self.next_pub is not None and ready:
+            self.create_subscription(Int32, ready, lambda m: setattr(self, 'crate_ready', int(m.data)), 10)
 
     def cb_done(self, msg):
         self.done = msg.data
@@ -199,7 +238,7 @@ class VisionPick(Node):
         raise TimeoutError(f'no new frame in {cam} after {TIMEOUT["capture"]:.0f} s: is robot_sim.py running with a wrist_camera?')
 
     def estimate(self, cam, frame, args, work):
-        """convert + infer for the one frame; returns (the poses of its pose6d.json, the picture infer.py made of them, K of the camera)"""
+        """convert + infer for the one frame; returns (the poses of its pose6d.json, the camera image, K, the raw json, T_world_cam, dist, the ROI polygon or None)"""
         sub_cam = work / 'camera'
         for sub, ext in (('rgb', '.png'), ('depth', '.png'), ('pose', '.json')):
             (sub_cam / sub).mkdir(parents=True)
@@ -207,6 +246,18 @@ class VisionPick(Node):
         for name in ('camera.json', 'undistort_map.npy'):
             if (cam / name).is_file():
                 shutil.copy(cam / name, sub_cam / name)
+        cam_json = json.load(open(sub_cam / 'camera.json'))
+        K = np.array([[cam_json['fx'], 0.0, cam_json['cx']], [0.0, cam_json['fy'], cam_json['cy']], [0.0, 0.0, 1.0]])
+        dist = cam_json.get('dist') or [0.0] * 5
+        T_world_cam = np.array(json.load(open(sub_cam / 'pose' / '000000.json'))['T_world_cam'])
+        poly = None
+        if self.crate:                                                  # only the crate under the camera: the rest of the copy is blacked out (the original frame stays)
+            poly = roi_polygon(self.crate, T_world_cam, K, dist)            # the parts to pick: their centre inside the floor minus margin
+            rgb = cv2.imread(str(sub_cam / 'rgb' / '000000.png'))
+            depth = cv2.imread(str(sub_cam / 'depth' / '000000.png'), cv2.IMREAD_UNCHANGED)
+            rgb, depth = mask_outside(rgb, depth, roi_polygon(self.crate, T_world_cam, K, dist, margin=0.0))   # what is looked at: the whole floor
+            cv2.imwrite(str(sub_cam / 'rgb' / '000000.png'), rgb)
+            cv2.imwrite(str(sub_cam / 'depth' / '000000.png'), depth)
         env = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'LD_LIBRARY_PATH')}    # the ROS environment must not leak into the torch venv
         python = str(args.gdrnpp / '.venv' / 'bin' / 'python')
         steps = [
@@ -219,13 +270,40 @@ class VisionPick(Node):
             if r.returncode:
                 raise RuntimeError(f'{Path(cmd[1]).name} failed ({r.returncode}):\n' + '\n'.join((r.stdout + r.stderr).strip().splitlines()[-15:]))
         files = sorted((work / 'run').glob('*_pose6d.json'))
-        if not files:
-            raise RuntimeError(f'infer.py wrote no *_pose6d.json in {work / "run"}')
         overlay = Image.open(sub_cam / 'rgb' / '000000.png').convert('RGB')                  # the camera image itself: the picture is drawn on it (and blurred) here
         overlay.load()
-        cam_json = json.load(open(sub_cam / 'camera.json'))
-        K = np.array([[cam_json['fx'], 0.0, cam_json['cx']], [0.0, cam_json['fy'], cam_json['cy']], [0.0, 0.0, 1.0]])
-        return json.load(open(files[-1]))['poses'], overlay, K, json.load(open(files[-1]))
+        raw = json.load(open(files[-1])) if files else {'frame': '000000', 'poses': []}   # infer.py writes no json when it detects nothing: the crate is empty
+        return raw['poses'], overlay, K, raw, T_world_cam, dist, poly
+
+    def activate(self):
+        """crate.active_topic: the crate picked from now (index, centre): robot_sim.py gives it (and its parts) physics and takes it from the one before"""
+        if self.active_pub is not None:
+            self.active_pub.publish(String(data=json.dumps({'index': self.idx, 'centre': list(self.crate['centre']), 'floor_z': float(self.crate['floor_z'])})))
+
+    def next_crate(self):
+        """the crate is empty: robot_sequence.py takes the arm to the scan pose of the next one of `crates:` (after the last of a layer: the first of the layer below);
+        True = it is there (the ROI is that crate now)"""
+        if self.next_pub is None or self.idx + 1 >= len(self.crates):
+            self.get_logger().info('the last crate (of the bottom layer) is empty: done' if self.crates else 'done')
+            return False
+        i = self.idx + 1
+        self.crate_ready = None
+        self.wait_for(self.next_pub, 'the next crate topic')
+        self.next_pub.publish(Int32(data=i))
+        new_layer = self.crates[i]['level'] != self.crates[self.idx]['level']
+        self.idx, self.crate = i, {**self.crate, 'centre': self.crates[i]['centre'], 'floor_z': self.crates[i]['floor_z']}
+        self.activate()                                                 # its physics on while the arm goes there (the parts settle meanwhile); a crate of a lower layer: robot_sim.py hides the layer above
+        self.get_logger().info(f"next crate {i} (centre {self.crates[i]['centre']}, layer {self.crates[i]['level']} from the top, floor z {self.crates[i]['floor_z']:.4f})"
+                               + (": the layer above is done, it is taken away" if new_layer else "") + ": the arm goes to its scan pose")
+        end = time.time() + TIMEOUT['sequence']
+        while self.crate_ready is None and time.time() < end:
+            self.spin_for(0.5)
+        if self.crate_ready != i:
+            self.get_logger().error(f'the arm did not reach the scan pose of crate {i} ({"no answer" if self.crate_ready is None else "it failed"}): stopping')
+            return False
+        self.failed = []
+        time.sleep(float(self.crate.get('settle_s', 1.0)))              # the parts of the crate that was switched on are at rest
+        return True
 
     def pick_once(self, args):
         """one capture + estimate + target. Returns False when there is nothing (confident) to pick"""
@@ -233,27 +311,37 @@ class VisionPick(Node):
         frame = args.frame or self.capture(cam)
         self.get_logger().info(f'frame {frame} ' + ('(already there)' if args.frame else 'captured'))
         with tempfile.TemporaryDirectory(prefix='vision_pick_') as tmp:
-            poses, overlay, K, raw = self.estimate(cam, frame, args, Path(tmp))
-        good = sorted((p for p in poses if p.get('confident')), key=lambda p: -p['score'])
+            poses, overlay, K, raw, T_world_cam, dist, poly = self.estimate(cam, frame, args, Path(tmp))
+        good = rank(poses, T_world_cam, K, dist, poly, self.crate)      # pick_filter.py: in the crate, flat, highest, nearest to its centre
         left = [p for p in good if all(math.hypot(p['xyz_m'][0] - x, p['xyz_m'][1] - y) > args.skip_radius for x, y in self.failed)]
         if len(left) < len(good):
             self.get_logger().info(f'{len(good) - len(left)} confident parts left out: near a pick that failed')
         good = left
         args.out.mkdir(parents=True, exist_ok=True)                    # the picture with the ranking, and the poses it is made of
         picture = args.out / f'{frame}_pick.png'
+        if poly is not None:
+            ImageDraw.Draw(overlay).polygon([tuple(int(v) for v in q) for q in poly], outline=(255, 255, 0), width=3)   # the ROI
         draw_ranking(overlay, poses, good, K, box_corners(args.models), f'frame {frame}: {len(poses)} parts, {len(good)} confident', blur=args.blur).save(picture)
         json.dump(raw, open(args.out / f'{frame}_pose6d.json', 'w'), indent=1)
         self.get_logger().info(f'picture: {picture}')
         self.picture_pub.publish(String(data=str(picture)))              # shown in Isaac Sim (robot_sim.py)
         self.get_logger().info(f'{len(poses)} parts found, {len(good)} confident; highest scores: ' +
                                ', '.join(f"{p['score']:.6f} ({p['state']})" for p in good[:3]))
+        self.empty = not poses
+        if not poses:
+            self.get_logger().info(f'no part detected: crate {self.idx} is empty')
+            if self.clear_pub is not None and not args.dry_run:          # the crate it was, as json (index, centre, size, yaw, ...): what comes next (palletizing the empty crate) takes it from there
+                self.clear_pub.publish(String(data=json.dumps({'index': self.idx, **{k: v for k, v in self.crate.items() if not k.endswith('_topic')}})))
+                self.spin_for(1.0)
+                self.get_logger().info(f'crate clear -> {self.clear_topic}')
+            return False
         if not good:
             self.get_logger().warn('no confident part: nothing to pick')
             return False
         best = good[0]
         pose, state = pose_from_line(best['ee_6d'])
         self.last_xy = (best['xyz_m'][0], best['xyz_m'][1])
-        self.get_logger().info(f"pick: {best['ee_6d']}  (score {best['score']:.6f})")
+        self.get_logger().info(f"pick: {best['ee_6d']}  (score {best['score']:.6f}, tilt {best.get('tilt_deg', 0.0):.1f} deg)")
         if args.dry_run:
             return True
         self.wait_for(self.target_pub, TOPIC_TARGET)
@@ -267,7 +355,8 @@ class VisionPick(Node):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--robot', help='robot name (default: scene.robot of map.yaml): its wrist_camera.output_dir is where the frames are')
+    ap.add_argument('--robot', help='robot name (default: the robot of the running robot_sim.py): its wrist_camera.output_dir is where the frames are')
+    ap.add_argument('--map', help='map name = isaacsim/configs/map/<map>.yaml: its robot (scene.robot) when --robot is not given')
     ap.add_argument('--camera-dir', type=Path, help='folder of the captured frames (default: wrist_camera.output_dir of the robot yaml)')
     ap.add_argument('--gdrnpp', type=Path, default=GDRNPP, help='the gdrnpp_bin_6DOF_estimation folder (with its .venv)')
     ap.add_argument('--models', type=Path, default=MODELS, help='CAD models folder given to camera_convert_data.py --to-bop')
@@ -280,13 +369,20 @@ def main():
     ap.add_argument('--loop', action='store_true', help='after every pick wait for /sequence_done and then for /transfer_done (the plate was put on the conveyor and the arm is at home again) and capture again, until nothing confident is left')
     ap.add_argument('--no-transfer', action='store_true', help='--loop: do not wait for /transfer_done (a sequence without a transfer of the plate to the conveyor)')
     args, ros_args = ap.parse_known_args()
-    args.camera_dir = args.camera_dir or camera_dir(args.robot)
+    args.camera_dir = args.camera_dir or camera_dir(args.robot, args.map)
+    crate, crates = crate_of(args.robot, args.map)
     rclpy.init(args=ros_args)
-    node = VisionPick()
+    node = VisionPick(crate, crates)
+    node.get_logger().info(f'crate (ROI): {node.crate}' + (f', {len(crates)} crates in turn' if crates else '') if crate else 'no `crate:` in the sequence yaml: the whole image is used')
+    node.activate()                                                     # the first crate has the physics (robot_sim.py starts with it anyway)
     try:
         fails = 0
         while True:
-            if not node.pick_once(args) or args.dry_run or not args.loop:
+            if not node.pick_once(args):
+                if node.empty and args.loop and not args.dry_run and node.next_crate():   # crates: the next one, from its scan pose
+                    continue
+                break
+            if args.dry_run or not args.loop:
                 break
             end = time.time() + TIMEOUT['sequence']
             while node.done is None and time.time() < end:

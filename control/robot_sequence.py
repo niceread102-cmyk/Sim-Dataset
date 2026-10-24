@@ -1,7 +1,7 @@
 """Pick & place sequence control for any robot: /target_pose (Pose, TCP target in the world frame of ik_node.yaml base_frame) -> MoveIt2 /move_action + /gripper/command
 
-    python3 control/robot_sequence.py --sequence m20_35_18d_jegg2510n [--robot m20_35_18d_jegg2510n]
-    ros2 launch robot.launch.py robot:=m20_35_18d_jegg2510n sequence:=m20_35_18d_jegg2510n       (without sequence:= only ik_node runs)
+    python3 control/robot_sequence.py --sequence side_plate [--robot m20_35_18d_mhzl2_20d] [--map SIDE_PLATE_MAP]
+    ros2 launch robot.launch.py map:=SIDE_PLATE_MAP sequence:=side_plate       (without sequence:= only ik_node runs)
 
 A sequence is one yaml of isaacsim/configs/sequence/<name>.yaml: a task on a map (where the part is let go of, the approach distance, ...,
 in the world coordinates of the map). `robots:` in it holds what differs for one robot (key = robot name; any key of the yaml, e.g.
@@ -9,9 +9,10 @@ trajectory: the way the arm travels between the poses), `robot:` (optional) limi
 sequence (e.g. a robot's own yaml with its trajectory on top of the task of the map). Everything else (tolerances,
 topics, ...) is the same for every task and comes from isaacsim/configs/sequence/robot_sequence.yaml. Everything about the
 robot comes from its own files: planning group, arm joints, base frame, end frame and TCP length from
-bringup/<robot>/config/ik_node.yaml (made by isaacsim/make_robot_config.py), the start pose (joint_pos), the gripper topic and joint from
-isaacsim/configs/robots/<robot>.yaml and the gripper URDF (a robot without a gripper skips the gripper steps). Nothing of the scene
-(map, pallets, boxes, basket) is read: the sequence belongs to the robot alone. The home pose is the TCP of the start pose of the robot
+bringup/<robot>/config/ik_node.yaml (made by isaacsim/make_robot_config.py), the start pose (joint_pos), the speed of the motions
+(velocity_scaling, acceleration_scaling), the gripper topic and joint from isaacsim/configs/robot/<robot>.yaml and the gripper URDF (a robot
+without a gripper skips the gripper steps). Of the map (--map) only its robot is read (scene.robot, when --robot and the sequence name none):
+the sequence belongs to the robot alone. The home pose is the TCP of the start pose of the robot
 (joint_pos of its yaml; ik_seed_deg of ik_node.yaml if it has none), unless poses.home gives a pose. poses.place (default: the home pose) is
 where the part is let go of: one pose, or one pose per state of the part (`standard`, `turn_over`: the word after the pose in ee_6d.py,
 published on topics.place_variant; with `target: object` the sequence decides it itself); poses.release (optional) is a pose below it that the gripper goes down to first.
@@ -75,6 +76,7 @@ It receives the same /target_pose as ik_node.py, so the two must not run togethe
 import argparse
 import math
 import re
+import sys
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -86,20 +88,21 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from geometry_msgs.msg import Pose, PoseStamped, Point, Quaternion
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
-from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes
+from moveit_msgs.msg import Constraints, JointConstraint, MotionPlanRequest, MoveItErrorCodes, RobotTrajectory
 from moveit_msgs.srv import GetCartesianPath, GetPositionFK, GetPositionIK
 from sensor_msgs.msg import JointState
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Bool, Empty, Float64, String
+from std_msgs.msg import Bool, Empty, Float64, Int32, String
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from scipy.spatial.transform import Rotation
 
 import compute_grasp_tcp_pose as grasp    # object pose -> the TCP that grips it, and whether the object is upside down
 
 SIM_DIR = Path(__file__).resolve().parents[1]
-ISAAC_DIR = SIM_DIR / 'isaacsim'
-CONFIG_FILE = ISAAC_DIR / 'configs' / 'sequence' / 'robot_sequence.yaml'   # the task, the same for every robot
-ROBOTS_DIR = ISAAC_DIR / 'configs' / 'robots'
-MAP_FILE = ISAAC_DIR / 'configs' / 'map' / 'map.yaml'
+sys.path.insert(0, str(SIM_DIR / 'isaacsim'))
+import sim_config  # noqa: E402  the maps, robots and machines of isaacsim/configs/
+
+CONFIG_FILE = Path(sim_config.SEQUENCE_DIR) / 'robot_sequence.yaml'   # the task, the same for every robot
 
 # Keys of the merged config (checked by load_config). robot, ik.seed, the gripper and the poses are filled in from the files of the robot
 REQUIRED_KEYS = {
@@ -118,21 +121,6 @@ REQUIRED_KEYS = {
 ERROR_NAMES = {v: k for k, v in vars(MoveItErrorCodes).items() if k.isupper() and isinstance(v, int)}
 
 
-def deep_merge(base, over):
-    out = dict(base)
-    for k, v in over.items():
-        out[k] = deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-    return out
-
-
-def robot_name(choice=None):
-    """The robot of the sequence: --robot, else `scene.robot` of map.yaml (the one `lab robot_sim.py` starts)."""
-    name = choice or str(((yaml.safe_load(open(MAP_FILE)) or {}).get('scene') or {}).get('robot') or '')
-    if not name:
-        raise ValueError(f'no robot: pass --robot <name> or set `scene.robot` in {MAP_FILE}')
-    return name
-
-
 def gripper_joint(robot, robot_cfg):
     """(joint, lower, upper) of the gripper of the robot (positions in m), None for a robot without one: the first joint
     that is not a mimic joint of the gripper URDF (`gripper:` of the robot yaml), or the first of `gripper_joints:` (a
@@ -140,10 +128,9 @@ def gripper_joint(robot, robot_cfg):
     names = list(robot_cfg.get('gripper_joints') or [])
     gripper = str(robot_cfg.get('gripper') or 'none')
     if gripper.lower() not in ('none', 'null'):
-        urdf = SIM_DIR / 'assets' / 'grippper' / gripper / 'urdf' / f'{gripper}.urdf'
+        urdf = Path(sim_config.GRIPPER_ASSETS) / gripper / 'urdf' / f'{gripper}.urdf'
     elif names:                                      # assets/robot/<robot>/urdf/<robot>.urdf, or <robot>.urdf in another assets/robot/*/urdf/
-        urdf = SIM_DIR / 'assets' / 'robot' / robot / 'urdf' / f'{robot}.urdf'
-        urdf = urdf if urdf.is_file() else next(iter(sorted((SIM_DIR / 'assets' / 'robot').glob(f'*/urdf/{robot}.urdf'))), urdf)
+        urdf = Path(sim_config.find_urdf(robot))
     else:
         return None
     joints = {j.get('name'): j for j in ET.parse(urdf).getroot().findall('joint') if j.get('type') in ('revolute', 'continuous', 'prismatic')}
@@ -158,12 +145,14 @@ def sequence_names(folder=CONFIG_FILE.parent):
     return sorted(f.stem for f in Path(folder).glob('*.yaml') if f.name != CONFIG_FILE.name)
 
 
-def load_config(path=CONFIG_FILE, robot=None, sequence=None):
+def load_config(path=CONFIG_FILE, robot=None, sequence=None, map_name=None):
     """The task parameters (+ the overrides of the robot) with everything about the robot filled in from its own files. Raises
-    a clear error if a key is missing or the seed does not match the joints. Only the robot's own files are read, nothing of the scene."""
+    a clear error if a key is missing or the seed does not match the joints. Of the map (map_name) only its robot is read (scene.robot,
+    the default of --robot when the sequence names none), nothing else of the scene."""
+    scene = sim_config.scene_of(map_name)
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    own = Path(path).parent / f'{sequence or robot_name(robot)}.yaml'      # what differs for this robot (optional when only the robot is named)
+    own = Path(path).parent / f'{sequence or sim_config.pick_robot(robot, scene)}.yaml'      # what differs for this robot (optional when only the robot is named)
     if sequence and not own.is_file():
         raise ValueError(f'sequence {sequence!r} not found: {own} (sequences: {", ".join(sequence_names(own.parent)) or "-"})')
     declared = None
@@ -176,33 +165,26 @@ def load_config(path=CONFIG_FILE, robot=None, sequence=None):
                 raise ValueError(f'{own.name}: extends {base!r} but {base_file} does not exist (sequences: {", ".join(sequence_names(own.parent))})')
             parent = yaml.safe_load(open(base_file)) or {}
             parent.pop('robot', None)
-            cfg = deep_merge(cfg, {k: v for k, v in parent.items() if k != 'robots'})
-            mine = deep_merge({'robots': parent.get('robots') or {}}, mine)
+            cfg = sim_config.deep_merge(cfg, {k: v for k, v in parent.items() if k != 'robots'})
+            mine = sim_config.deep_merge({'robots': parent.get('robots') or {}}, mine)
         declared = mine.pop('robot', None)                                 # the robot this sequence is limited to (optional)
         per_robot = mine.pop('robots', None) or {}                         # what differs for one robot: {robot name: {any key of this yaml}}
-        cfg = deep_merge(cfg, mine)
+        cfg = sim_config.deep_merge(cfg, mine)
     else:
         per_robot = {}
     cfg.pop('robot', None)
     if robot and declared and robot != declared:
         raise ValueError(f'{own.name} is the sequence of the robot {declared}, not {robot}')
-    robot = robot_name(robot or declared)
+    robot = sim_config.pick_robot(robot or declared, scene)
     if per_robot.get(robot):
-        cfg = deep_merge(cfg, per_robot[robot])
-    sp = (cfg.get('speeds') or {}).get(robot) or {}                        # speeds: of the sequence yaml (all speeds of the cell): the planning speed of the arm
-    for key in ('velocity_scaling', 'acceleration_scaling'):
-        if key in sp:
-            cfg.setdefault('motion', {})[key] = float(sp[key])
-    sp = (cfg.get('speeds') or {}).get(robot) or {}                        # speeds: of the sequence yaml (all speeds of the cell): the planning speed of the arm
-    for key in ('velocity_scaling', 'acceleration_scaling'):
-        if key in sp:
-            cfg.setdefault('motion', {})[key] = float(sp[key])
-    ik_file = SIM_DIR / 'bringup' / robot / 'config' / 'ik_node.yaml'
+        cfg = sim_config.deep_merge(cfg, per_robot[robot])
+    ik_file = Path(sim_config.BRINGUP_DIR) / robot / 'config' / 'ik_node.yaml'
     if not ik_file.is_file():
         raise ValueError(f'{ik_file} not found: python3 isaacsim/make_robot_config.py robot:={robot}')
     ik = yaml.safe_load(open(ik_file))
-    robot_file = ROBOTS_DIR / f'{robot}.yaml'
-    robot_cfg = (yaml.safe_load(open(robot_file)) or {}) if robot_file.is_file() else {}
+    robot_cfg = sim_config.load_robot(robot)
+    motion = sim_config.robot_motion(robot_cfg)                            # the speed of the arm is the robot's (configs/robot/<robot>.yaml)
+    cfg.setdefault('motion', {}).update(velocity_scaling=float(motion['velocity_scaling']), acceleration_scaling=float(motion['acceleration_scaling']))
 
     tcp = [float(x) for x in ik.get('tcp_offset', [0.0, 0.0, 0.0])]       # TCP in the end frame: length and direction
     length = math.sqrt(sum(x * x for x in tcp))
@@ -339,12 +321,15 @@ def build_joint_goal(positions, cfg):
     return goal
 
 
-def build_line_request(pose, cfg):
-    """GetCartesianPath request: straight line of the tip_link from the pose move_group knows now to pose"""
+def build_line_request(pose, cfg, start_q=None):
+    """GetCartesianPath request: straight line of the tip_link from the pose move_group knows now to pose
+    (start_q: the arm joints (rad) the line starts from instead, for a path that is planned in pieces before the arm moves)"""
     robot, line, motion = cfg['robot'], cfg['line'], cfg['motion']
     req = GetCartesianPath.Request()
     req.header.frame_id                 = robot['base_link']
     req.start_state.is_diff             = True   # empty + is_diff = start where the arm is now
+    if start_q is not None:
+        req.start_state.joint_state     = JointState(name=list(robot['arm_joints']), position=list(start_q))   # is_diff: only these joints are replaced
     req.group_name                      = robot['planning_group']
     req.link_name                       = robot['tip_link']
     req.waypoints                       = [pose]
@@ -404,6 +389,67 @@ def via_steps(label, start, end, max_step, max_angle):
     return steps
 
 
+MOTION_KINDS = ('line', 'move', 'joints', 'ik')
+CORNER_LABELS = ('insert', 'lower')        # the straight moves down into the bore / onto the seat: the pose above them is a corner the arm has to reach exactly
+
+
+def fuse_steps(steps):
+    """fuse_moves: the motion steps between two gripper steps (or an align step) become ONE `path` step: every piece is planned from the end of the
+    one before, the pieces are joined into a single trajectory and executed once, so the arm goes through the poses in between (home, above the
+    place pose, ...) without stopping. The IK-only steps of such a group only carry the IK seed along"""
+    out, group = [], []
+
+    def flush():
+        nonlocal group
+        real = [st for st in group if st['kind'] != 'ik']
+        if len(real) > 1:
+            out.append({'label': '+'.join(st['label'] for st in real), 'kind': 'path', 'steps': group,
+                        'settle': group[-1].get('settle', 0.0), 'search': False})
+        else:
+            out.extend(group)
+        group = []
+    for st in steps:
+        if st['kind'] in MOTION_KINDS:
+            group.append(st)
+        else:
+            flush()
+            out.append(st)
+    flush()
+    return out
+
+
+def travel(cfg, name):
+    """how the arm goes to a pose of its path (trajectory.<name> of the sequence): 'line' = a straight line of the tool, else 'joint'"""
+    return 'line' if str((cfg.get('trajectory') or {}).get(name, 'joint')).lower() == 'line' else 'joint'
+
+
+def go(cfg, label, pose, start, mode):
+    """travel step to pose from where the previous step ended (start): home = the start pose of the robot (its own joint angles, no IK),
+    else a straight line or a joint goal (trajectory.<mode>)"""
+    if mode == 'home' and cfg.get('home_joints'):
+        return joints(label, cfg['home_joints'])
+    return line(label, pose, start) if travel(cfg, mode) == 'line' else move(label, pose, search=True)
+
+
+def approach_step(cfg, approach, home):
+    """the move to the approach pose above the part: a straight line from home (trajectory.approach: line) or an IK goal without the waypoint search"""
+    return go(cfg, 'approach', approach, home, 'approach') if travel(cfg, 'approach') == 'line' else move('approach', approach)
+
+
+def grips(cfg, *a, **k):
+    """a gripper step as a list: empty for a robot without a gripper (it skips these steps)"""
+    return [grip(*a, **k)] if cfg['gripper']['enabled'] else []
+
+
+def ik_candidates(cfg, step):
+    """the poses the IK is asked for, in order: the exact pose, then (waypoints only: step['search']) poses moved toward the base"""
+    candidates = [(step['value'], 0.0)]
+    if step['search']:
+        radius = cfg['tolerance']['waypoint_position']
+        candidates += [(shift_toward_base(step['value'], radius * f), radius * f) for f in (0.25, 0.5, 1.0)]
+    return candidates
+
+
 def place_pose(cfg, variant=None):
     """poses.place for the state of the part (variant): the pose itself, or the entry of the mapping (standard when there is no such state)"""
     place = cfg['poses']['place']
@@ -412,12 +458,60 @@ def place_pose(cfg, variant=None):
     return place.get(variant) or place.get('standard') or next(iter(place.values()))
 
 
+def stays_over_standard(cfg, variant):
+    """transfer.stay_over_standard: after the part is put on the standard coordinate the arm only lifts (poses.place_offset) and stays there; the transfer goes straight down again.
+    transfer.stay_over_turn_over: after a part put on the turn_over coordinate too: the arm lifts and goes on to above the standard coordinate, where the flipper brings the part"""
+    place, t = cfg['poses']['place'], cfg.get('transfer') or {}
+    return bool(t.get('stay_over_standard')) and isinstance(place, dict) and (variant != 'turn_over' or bool(t.get('stay_over_turn_over')))
+
+
+def standard_above(cfg):
+    """flange pose above the standard coordinate where the arm stays after the lift (the same raised pose as make_sequence puts the part down from)"""
+    poses = cfg['poses']
+    chosen = place_pose(cfg, 'standard')
+    if poses.get('place_height') is not None:
+        z = poses['home'][2] if poses['place_height'] == 'home' else poses['place_height']
+    else:
+        z = chosen[2] + float(poses.get('place_offset') or 0.0)
+    return tcp_to_flange(xyzrpy_to_pose(chosen[0], chosen[1], z, *chosen[3:]), cfg)
+
+
+def carry_height(cfg):
+    """poses.carry_z: the TCP height the arm travels at between a crate and the place poses / home (home = the z of the home pose); None = none"""
+    cz = cfg['poses'].get('carry_z')
+    if cz is None:
+        return None
+    return float(cfg['poses']['home'][2]) if str(cz).strip().lower() == 'home' else float(cz)
+
+
+def raised(pose, dz):
+    """a flange pose moved up by dz in world z (the tool points down: the TCP goes up with it)"""
+    p = pose.position
+    return Pose(position=Point(x=p.x, y=p.y, z=p.z + dz), orientation=pose.orientation)
+
+
+def home_high(cfg):
+    """(home flange pose, the same pose at carry_height or None when home is already that high): the way to / from a home pose in a lower layer goes
+    straight down / up from the carry height, never across the laser marker at a low height"""
+    poses = cfg['poses']
+    home = tcp_to_flange(xyzrpy_to_pose(*poses['home']), cfg)
+    cz = carry_height(cfg)
+    return home, (raised(home, cz - float(poses['home'][2])) if cz is not None and cz > float(poses['home'][2]) + 1e-3 else None)
+
+
+def high_way_home(cfg, here, here_z, home, home_hi, label):
+    """from `here` (flange pose, its TCP at here_z) to a low home: straight up to the carry height, across at that height, straight down - three short
+    lines instead of one long diagonal (that one was not fully possible, its joint-space fallback swept past the laser marker table)"""
+    up = raised(here, carry_height(cfg) - here_z)
+    return [*([line('up to the carry height', up, here)] if carry_height(cfg) > here_z + 1e-3 else []),
+            line('above home', home_hi, up), line(label, home, home_hi)]
+
+
 def make_sequence(target, cfg, variant=None):
     """All steps for one /target_pose (TCP); variant = the state of the part (key of poses.place)"""
     gripper, poses = cfg['gripper'], cfg['poses']
     release_settle = float(gripper.get('release_settle', 0.0))                    # s the jaws get to be fully back before the arm lifts away from the part
     traj = cfg.get('trajectory') or {}
-    travel = lambda name: 'line' if str(traj.get(name, 'joint')).lower() == 'line' else 'joint'    # how the arm goes to a pose of its path
     chosen   = place_pose(cfg, variant)
     place_tcp = poses['home'] if chosen == 'home' else chosen
     release_tcp = poses.get('release')                                     # below place, optional
@@ -428,94 +522,97 @@ def make_sequence(target, cfg, variant=None):
         place_tcp, release_tcp = [chosen[0], chosen[1], chosen[2] + poses['place_offset'], *chosen[3:]], chosen
     flange   = tcp_to_flange(target, cfg)
     approach = offset_pose(flange, -cfg['approach']['distance'], cfg['robot']['tool_axis'])  # above the target (against the TCP z axis)
-    home     = tcp_to_flange(xyzrpy_to_pose(*poses['home']), cfg)
+    carry    = None                                                        # poses.carry_z: with the part straight up to this height first, then straight on to above the place pose
+    cz = carry_height(cfg)                                                 #   (not via home: the home of a lower layer is low, the way from there would cut past the laser marker)
+    if cz is not None and cz > target.position.z + cfg['approach']['distance'] + 1e-3:
+        carry = tcp_to_flange(Pose(position=Point(x=target.position.x, y=target.position.y, z=cz), orientation=target.orientation), cfg)
+    home, home_hi = home_high(cfg)
     via      = [tcp_to_flange(xyzrpy_to_pose(*v), cfg) for v in (traj.get('via') or [])]  # between home and place
     place    = tcp_to_flange(xyzrpy_to_pose(*place_tcp), cfg)
     release  = tcp_to_flange(xyzrpy_to_pose(*release_tcp), cfg) if release_tcp else None
     at_home  = chosen == 'home'                                            # the part is let go of at the home pose: no extra moves
-    g = (lambda *a, **k: [grip(*a, **k)]) if gripper['enabled'] else (lambda *a, **k: [])    # a robot without a gripper skips these steps
-
-    def go(label, pose, start, mode):
-        """travel step to pose from where the previous step ended (start)"""
-        if mode == 'home' and cfg.get('home_joints'):                      # home = the start pose of the robot: its own joint angles
-            return joints(label, cfg['home_joints'])
-        return line(label, pose, start) if travel(mode) == 'line' else move(label, pose, search=True)
+    stay     = stays_over_standard(cfg, variant) and not at_home           # transfer.stay_over_standard: the sequence ends above the standard coordinate (the transfer goes straight down again)
+    to_std   = stay and variant == 'turn_over'                             # transfer.stay_over_turn_over: from above the turn_over seat on to above the standard one (the flipper brings the part there)
 
     path = [] if at_home else [(f'via {i + 1}', v) for i, v in enumerate(via)] + [('place', place)]   # home -> via ... -> place
-    out, here = [], home
+    out, here = [], (carry or home)
     for label, pose in path:
-        out.append(go(label, pose, here, 'place' if label == 'place' else 'via'))
+        out.append(go(cfg, label, pose, here, 'place' if label == 'place' else 'via'))
         here = pose
     back, there = [], here                                                 # the way back: the via poses reversed, then home
     for label, pose in reversed(path[:-1]):
-        back.append(go('return ' + label, pose, there, 'via'))
+        back.append(go(cfg, 'return ' + label, pose, there, 'via'))
         there = pose
     return [
-        *g('close gripper (start)', gripper['close']),                                # a sequence cancelled earlier may have left it open
+        *grips(cfg, 'close gripper (start)', gripper['close']),                       # a sequence cancelled earlier may have left it open
         *via_steps('approach', home, approach, cfg['line']['ik_step'], cfg['line']['ik_angle_step']),  # IK only, no motion: the seed follows home -> approach
-        go('approach', approach, home, 'approach') if travel('approach') == 'line' else move('approach', approach),
+        approach_step(cfg, approach, home),
         line('insert',         flange,   approach),                                   # straight down
-        *g('open gripper',    gripper['open']),
+        *grips(cfg, 'open gripper', gripper['open']),
         line('rise',           approach, flange),                                     # straight back up
-        go('home',             home,     approach, 'home'),
+        *([line('carry',       carry,    approach)] if carry else [go(cfg, 'home', home, approach, 'home')]),   # straight on up to poses.carry_z (else to home)
         *out,
         *([line('lower',       release,  here),                                       # straight down to poses.release
-           *g('close gripper', gripper['close'], settle=release_settle),             # lets go of the part
+           *grips(cfg, 'close gripper', gripper['close'], settle=release_settle),    # lets go of the part
            line('lift',        here,     release)]                                    # straight back up
-          if release else [*g('close gripper', gripper['close'], settle=release_settle)]),         # lets go of the part at the place pose
-        *back,
-        *([] if at_home else [go('return home', home, there, 'home')]),
+          if release else [*grips(cfg, 'close gripper', gripper['close'], settle=release_settle)]),   # lets go of the part at the place pose
+        *([line('wait above standard', standard_above(cfg), here)] if to_std else []),  # straight over to above the standard coordinate: the transfer goes down from there
+        *([] if stay else back),
+        *([] if (at_home or stay) else (high_way_home(cfg, there, float(place_tcp[2]), home, home_hi, 'return home') if home_hi is not None
+                                        else [go(cfg, 'return home', home, there, 'home')])),
     ]
 
 
-def make_transfer(cfg, place_tcp=None):
+def make_transfer(cfg, place_tcp=None, above=None):
     """The part lies at the standard coordinate: from home to it, pick it up again (approach, insert, open = the bore is expanded, rise), 'measure yaw' (the yaw of the plate in
     the hand is read from the simulation and the wrist is turned by it on the way: the steps after it are made again by transfer_steps), then put it on the carrier of the belt"""
-    head, tail = transfer_steps(cfg, place_tcp)
+    head, tail = transfer_steps(cfg, place_tcp, above)
     return head + [{'label': 'measure yaw', 'kind': 'align', 'value': None, 'search': False}] + tail
 
 
-def transfer_steps(cfg, place_tcp=None):
-    """(steps up to the rise at the standard coordinate, steps from there to the carrier and home): the second part for a place pose [x, y, z, r, p, y] (default transfer.place)"""
+def transfer_steps(cfg, place_tcp=None, above=None):
+    """(steps up to the rise at the standard coordinate, steps from there to the carrier and home): the second part for a place pose [x, y, z, r, p, y] (default transfer.place).
+    above = flange pose of the arm when it already hangs above the standard coordinate (transfer.stay_over_standard): straight down from there, no home / approach"""
     gripper, poses, t = cfg['gripper'], cfg['poses'], cfg['transfer']
     release_settle = float(gripper.get('release_settle', 0.0))
-    traj = cfg.get('trajectory') or {}
-    travel = lambda name: 'line' if str(traj.get(name, 'joint')).lower() == 'line' else 'joint'
     step, angle = cfg['line']['ik_step'], cfg['line']['ik_angle_step']
     pick     = tcp_to_flange(xyzrpy_to_pose(*t['pick']), cfg)
     approach = offset_pose(pick, -cfg['approach']['distance'], cfg['robot']['tool_axis'])
     x, y, z, *rest = place_tcp or t['place']
     up       = tcp_to_flange(xyzrpy_to_pose(x, y, z + float(poses.get('place_offset') or cfg['approach']['distance']), *rest), cfg)   # raised
     down     = tcp_to_flange(xyzrpy_to_pose(x, y, z, *rest), cfg)
-    home     = tcp_to_flange(xyzrpy_to_pose(*poses['home']), cfg)
-    g = (lambda *a, **k: [grip(*a, **k)]) if gripper['enabled'] else (lambda *a, **k: [])
+    home, home_hi = home_high(cfg)
 
-    def go(label, pose, start, mode):
-        if mode == 'home' and cfg.get('home_joints'):
-            return joints(label, cfg['home_joints'])
-        return line(label, pose, start) if travel(mode) == 'line' else move(label, pose, search=True)
-
+    insert_a = dict(line('insert', pick, approach), follow_part=True)        # follow_part: goes down at the xy where the plate really lies (transfer.follow_part_xy)
+    insert_b = dict(line('insert', pick, above), follow_part=True) if above is not None else None
+    start    = home_hi or home                                             # from a low home (a lower layer): straight up first
     head = [
-        *g('close gripper (start)', gripper['close']),
-        *via_steps('approach', home, approach, step, angle),
-        go('approach', approach, home, 'approach') if travel('approach') == 'line' else move('approach', approach),
-        line('insert', pick, approach),
-        *g('open gripper', gripper['open']),
-        line('rise', approach, pick),
+        *grips(cfg, 'close gripper (start)', gripper['close']),
+        *([line('above home', home_hi, home)] if home_hi is not None else []),
+        *via_steps('approach', start, approach, step, angle),
+        approach_step(cfg, approach, start),
+        insert_a,
+        *grips(cfg, 'open gripper', gripper['open']),
+        dict(line('rise', approach, pick), follow_part=True),                  # straight up where it went down
+    ] if above is None else [
+        insert_b,                                                              # the arm hangs above the standard coordinate: straight down to the part
+        *grips(cfg, 'open gripper', gripper['open']),
+        dict(line('rise', approach, pick), follow_part=True),
     ]
     tail = [
         *via_steps('place', approach, up, step, angle),                       # IK seeds along the way to the belt (the wrist turns on the way)
-        go('place', up, approach, 'place'),
+        go(cfg, 'place', up, approach, 'place'),
         line('lower', down, up),
-        *g('close gripper', gripper['close'], settle=release_settle),         # lets go of the part on the carrier
+        *grips(cfg, 'close gripper', gripper['close'], settle=release_settle),   # lets go of the part on the carrier
         line('lift', up, down),
-        go('home', home, up, 'home'),
+        *(high_way_home(cfg, up, z + float(poses.get('place_offset') or cfg['approach']['distance']), home, home_hi, 'home') if home_hi is not None
+          else [go(cfg, 'home', home, up, 'home')]),
     ]
     return head, tail
 
 
 LABEL_WAITS = {'close gripper (start)': 'close_gripper_start', 'approach': 'approach', 'insert': 'insert', 'open gripper': 'open_gripper', 'rise': 'rise',
-               'home': 'home', 'place': 'place', 'lower': 'lower', 'close gripper': 'release', 'lift': 'lift', 'return home': 'return_home'}   # step label -> key of `waits:` of the sequence yaml
+               'carry': 'carry', 'home': 'home', 'place': 'place', 'lower': 'lower', 'close gripper': 'release', 'lift': 'lift', 'return home': 'return_home'}   # step label -> key of `waits:` of the sequence yaml
 
 
 def apply_waits(steps, waits):
@@ -537,10 +634,19 @@ class SequenceNode(Node):
         self.done_pub    = self.create_publisher(String, cfg['topics'].get('sequence_done', '/sequence_done'), 10)
         self.variant_sub = self.create_subscription(String, cfg['topics'].get('place_variant', '/place_variant'), self.cb_variant, 10)
         self.part_pose   = None                                          # (Pose, time) of the part the robot goes for: robot_sim.py publishes it (the plate that lies at the standard coordinate is the one)
+        self.follow      = None                                          # transfer: (dx, dy) of the plate at the standard coordinate against transfer.pick, found at its first followed step
         self.create_subscription(Pose, cfg['topics'].get('target_part_pose', '/target_part_pose'), lambda m: setattr(self, 'part_pose', (m, time.time())), 10)
+        self.over_standard = False                                       # the arm hangs above the standard coordinate (transfer.stay_over_standard): the transfer starts from there, not from home
         self.transfer_pending = False                                    # the machine said the part lies at the standard coordinate while the arm was busy: transfer it afterwards
         self.ready_sub   = self.create_subscription(Empty, cfg['topics'].get('machine_ready', '/laser_marker/ready'), self.cb_ready, 10) if cfg.get('transfer') else None
         self.transfer_pub = self.create_publisher(Empty, cfg['topics'].get('transfer_done', '/transfer_done'), 10)
+        crate = cfg.get('crate') or {}
+        self.crates = sim_config.expand_crates(crate, cfg.get('crates'))  # crates: of the sequence (side_plate_test) for every layer (crate.layers): the scan pose (home) of every crate, emptied in turn by vision_pick.py
+        self.crate_idx, self.crate_pending = None, None                 # the crate whose home is the home pose now; the one asked for while the arm was busy
+        self.crate_ready_pub = None
+        if self.crates and crate.get('next_topic'):
+            self.create_subscription(Int32, crate['next_topic'], self.cb_crate, 10)
+            self.crate_ready_pub = self.create_publisher(Int32, crate.get('ready_topic', '/crate_ready'), 10)
         self.turned_over = None                                          # state of the part clicked in the simulation (robot_sim.py): True = turned over, False = standard
         self.part_sub = self.create_subscription(Bool, cfg['topics'].get('part_turned_over', '/part_turned_over'), self.cb_part,
                                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
@@ -565,6 +671,7 @@ class SequenceNode(Node):
         self.move_timer  = None  # watchdog of that move (motion.timeout): only for a move_group that died, a normal move ends with its result
         self.init_timer  = self.create_timer(cfg['startup']['poll'], self.cb_init)  # checks until everything is up
         self.joint_pos   = {}       # latest position of every joint in /joint_states (empty until robot_sim.py is up)
+        self.path        = None     # the path that is being planned in pieces (fuse_moves)
         self.gripper_pending = None  # called with the answer of robot_sim.py to the gripper command that is running
         if self.gripper_pub:
             self.create_subscription(String, cfg['gripper']['result_topic'], self.cb_gripper_result, 10)
@@ -645,9 +752,12 @@ class SequenceNode(Node):
         self.start_transfer()
 
     def start_transfer(self):
+        self.follow = None
         t = self.cfg['transfer']
-        self.get_logger().info(f"transfer: home -> pick at the standard coordinate {t['pick']} (bore expanded) -> read the yaw of the plate in the hand, turn the wrist -> put it on the carrier of the belt {t['place']}")
-        self.start('transfer', make_transfer(self.cfg))
+        above = standard_above(self.cfg) if self.over_standard else None
+        self.over_standard = False
+        self.get_logger().info(f"transfer: {'above the standard coordinate' if above is not None else 'home'} -> pick at the standard coordinate {t['pick']} (bore expanded) -> read the yaw of the plate in the hand, turn the wrist -> put it on the carrier of the belt {t['place']}")
+        self.start('transfer', make_transfer(self.cfg, None, above))
 
     def align_yaw(self):
         """the 'measure yaw' step: the plate is in the hand (the bore is expanded, it was lifted straight up): its yaw in the world is read from the simulation, the wrist is turned by it,
@@ -665,7 +775,37 @@ class SequenceNode(Node):
         waits = dict(self.cfg.get('waits') or {})
         waits.update(waits.get('transfer') or {})
         self.steps = apply_waits(transfer_steps(self.cfg, place)[1], {k: v for k, v in waits.items() if k in LABEL_WAITS.values()})
+        if self.cfg.get('fuse_moves'):
+            self.steps = fuse_steps(self.steps)
         self.run_next()
+
+    def cb_crate(self, msg):
+        """crate.next_topic (vision_pick.py: the crate before is empty): the home pose becomes the scan pose of crate msg.data, the arm goes there"""
+        i = int(msg.data)
+        if not 0 <= i < len(self.crates):
+            self.get_logger().error(f'crate {i}: crates: of the sequence has {len(self.crates)} -> ignored')
+            self.crate_ready_pub.publish(Int32(data=-1))
+            return
+        if self.moving or isinstance(self.cfg['poses']['home'], str):
+            self.get_logger().info(f'crate {i}: the arm is busy -> it goes there when it is free')
+            self.crate_pending = i
+            return
+        self.start_crate(i)
+
+    def start_crate(self, i):
+        old, old_hi = home_high(self.cfg)
+        home = [float(v) for v in self.crates[i]['home']]
+        self.cfg['poses']['home'] = home                                   # every sequence / transfer / recovery returns here from now on
+        self.cfg.pop('home_joints', None)
+        self.crate_idx = i
+        new, new_hi = home_high(self.cfg)
+        self.get_logger().info(f"crate {i} (centre {self.crates[i].get('centre')}): home pose = its scan pose {' '.join(f'{v:g}' for v in home)}")
+        if carry_height(self.cfg) is None:
+            self.start('crate', [move(f'crate {i} scan pose', new, search=True)])
+            return
+        up, over = old_hi or old, new_hi or new                            # up to the carry height, over, straight down: not across the crates of the layer
+        self.start('crate', ([line('up from the crate', up, old)] if old_hi is not None else []) + [line(f'over crate {i}', over, up)]
+                   + ([line(f'crate {i} scan pose', new, over)] if new_hi is not None else []))
 
     def cb_part(self, msg):
         self.turned_over = bool(msg.data)
@@ -709,6 +849,8 @@ class SequenceNode(Node):
             waits.update(waits.get('transfer') or {})
         if name in ('sequence', 'transfer'):
             steps = apply_waits(steps, {k: v for k, v in waits.items() if k in LABEL_WAITS.values()})
+            if self.cfg.get('fuse_moves'):                                   # fuse_moves: of the sequence yaml: several moves in one trajectory (no stop in between)
+                steps = fuse_steps(steps)
         self.name   = name
         self.steps  = steps
         self.seed   = list(self.ready_seed)  # the first IK of every sequence starts from the ready pose
@@ -719,15 +861,21 @@ class SequenceNode(Node):
         if not self.steps:
             self.get_logger().info(f'{self.name} done')
             self.moving = False
+            self.over_standard = self.name == 'sequence' and stays_over_standard(self.cfg, self.seq_variant)   # the sequence of a part put on the standard coordinate ends above it
             if self.name == 'sequence':                                      # at home again: the machines of the scene (isaacsim/machine/) go on from here
                 self.done_pub.publish(String(data=self.seq_variant))
             elif self.name == 'transfer':                                    # the part lies on the carrier of the belt and the arm is at home: the belt moves one pitch (laser_marker.py)
                 self.transfer_pub.publish(Empty())
             elif self.name == 'recovery':                                    # back at home after a failed sequence: ready for the next target
                 self.done_pub.publish(String(data='failed'))
-            if self.transfer_pending and self.name in ('sequence', 'transfer', 'recovery'):
+            elif self.name == 'crate':                                       # at the scan pose of the next crate: vision_pick.py takes its picture
+                self.crate_ready_pub.publish(Int32(data=self.crate_idx))
+            if self.transfer_pending and self.name in ('sequence', 'transfer', 'recovery', 'crate'):
                 self.transfer_pending = False
                 self.start_transfer()
+            elif self.crate_pending is not None:
+                i, self.crate_pending = self.crate_pending, None
+                self.start_crate(i)
             return
         step = self.steps.pop(0)
         self.execute(step)
@@ -764,6 +912,7 @@ class SequenceNode(Node):
     def fail(self, message):
         self.cancel_move_timer()
         self.get_logger().error(message)
+        self.over_standard = False
         self.steps  = []
         self.moving = False
         self.gripper_pending = None
@@ -779,6 +928,9 @@ class SequenceNode(Node):
             self.recover()
         elif self.name == 'recovery':
             self.get_logger().error('recovery failed: the arm could not go back to the home pose (a target still starts the sequence)')
+        elif self.name == 'crate':
+            self.get_logger().error(f'crate {self.crate_idx}: its scan pose was not reached')
+            self.crate_ready_pub.publish(Int32(data=-1))
 
     def recover(self):
         """A move of the sequence failed for good (the arm is stuck, e.g. the gripper / extension against a crate): back to the home pose, so that the
@@ -800,21 +952,145 @@ class SequenceNode(Node):
             self.gripper_pending = lambda: self.later(step.get('settle', 0.0), self.run_next)    # the next step starts with the answer of robot_sim.py (+ settle s)
             self.gripper_pub.publish(Float64(data=step['value']))
             return
+        if step['kind'] == 'path':
+            self.run_path(step)
+            return
         if step['kind'] == 'line':
             self.move_tries = 0
-            self.plan_line(step)
+            self.plan_line(self.follow_part(step))
             return
         if step['kind'] == 'joints':
             self.seed, self.goal_q, self.move_tries = list(step['value']), list(step['value']), 0
             self.get_logger().info(f"[{step['label']}] joints: " + ' '.join(f'{j}={math.degrees(v):.1f}' for j, v in zip(self.cfg['robot']['arm_joints'], step['value'])))
             self.send_move()
             return
-        # candidate poses for the IK: the exact pose first, then (waypoints only) poses moved toward the base
-        candidates = [(step['value'], 0.0)]
-        if step['search']:
-            radius = self.cfg['tolerance']['waypoint_position']
-            candidates += [(shift_toward_base(step['value'], radius * f), radius * f) for f in (0.25, 0.5, 1.0)]
-        self.try_ik(step, candidates, 0)
+        self.try_ik(step, ik_candidates(self.cfg, step), 0)
+
+    # ---- one trajectory for several steps (fuse_moves) ----
+    def run_path(self, step):
+        """Plan every piece of step['steps'] from the end of the one before and execute them as one trajectory (see fuse_steps)"""
+        joints = self.cfg['robot']['arm_joints']
+        q0 = [self.joint_pos.get(j) for j in joints]
+        if any(v is None for v in q0):
+            self.path_abort(step, 'no /joint_states yet', list(self.seed))
+            return
+        self.move_tries = 0
+        self.retry = lambda: self.run_path(step)               # a retry plans the whole path again from where the arm is
+        self.path = {'step': step, 'queue': list(step['steps']), 'q': q0, 'seed0': list(self.seed), 'moves': 0, 't': 0.0,
+                     'points': [JointTrajectoryPoint(positions=q0, time_from_start=Duration(sec=0, nanosec=0))]}
+        self.path_next()
+
+    def path_next(self):
+        p = self.path
+        if not p['queue']:
+            self.path_send()
+            return
+        sub = p['queue'].pop(0)
+        if sub['label'] in CORNER_LABELS and len(p['points']) > 1:   # a corner in front of a straight move down: the last point is repeated, robot_sim.py makes the arm itself reach it (no cutting the corner)
+            self.path_point(p['q'], p['t'] + 0.001)
+        if sub['kind'] == 'joints':
+            self.seed = list(sub['value'])
+            self.path_add_joint_move(list(sub['value']))
+            self.path_next()
+        elif sub['kind'] == 'line':
+            sub = self.follow_part(sub, p['queue'])
+            future = self.line_client.call_async(build_line_request(sub['value'], self.cfg, p['q']))
+            future.add_done_callback(lambda f: self.cb_path_line(f, sub))
+        else:                                                   # move / ik: the same candidate poses as execute()
+            self.path_ik(sub, ik_candidates(self.cfg, sub), 0)
+
+    def path_ik(self, sub, candidates, index):
+        if index >= len(candidates):
+            self.path_abort(self.path['step'], f"[{sub['label']}] no IK solution", self.path['seed0'])
+            return
+        ik = self.cfg['ik']
+        future = self.ik_client.call_async(build_ik_request(candidates[index][0], self.seed, self.cfg, ik['timeout'] if index == 0 else ik['retry_timeout']))
+        future.add_done_callback(lambda f: self.cb_path_ik(f, sub, candidates, index))
+
+    def cb_path_ik(self, future, sub, candidates, index):
+        res = future.result()
+        if res.error_code.val != MoveItErrorCodes.SUCCESS:
+            self.path_ik(sub, candidates, index + 1)
+            return
+        joints = self.cfg['robot']['arm_joints']
+        solution = dict(zip(res.solution.joint_state.name, res.solution.joint_state.position))
+        if any(j not in solution for j in joints):
+            self.path_abort(self.path['step'], f"[{sub['label']}] IK result is missing joints", self.path['seed0'])
+            return
+        q = [solution[j] for j in joints]
+        self.seed = q                                           # the next piece starts its IK from this solution
+        if sub['kind'] != 'ik':
+            self.path_add_joint_move(q)
+        self.path_next()
+
+    def cb_path_line(self, future, sub):
+        res, line, p = future.result(), self.cfg['line'], self.path
+        traj = res.solution.joint_trajectory
+        if res.error_code.val != MoveItErrorCodes.SUCCESS or res.fraction < line['min_fraction'] or len(traj.points) < 2:
+            self.path_abort(p['step'], f"[{sub['label']}] straight line only {res.fraction * 100:.0f}% possible", p['seed0'])
+            return
+        joints = self.cfg['robot']['arm_joints']
+        t0 = p['t']
+        for pt in traj.points[1:]:                              # the first point is where the piece starts = the end of the one before
+            pos = dict(zip(traj.joint_names, pt.positions))
+            t = t0 + pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            self.path_point([pos[j] for j in joints], t)
+        self.seed = list(p['q'])                                # the next IK starts from where the line ends
+        p['moves'] += 1
+        self.path_next()
+
+    def path_point(self, q, t):
+        p = self.path
+        p['t'] = max(t, p['t'] + 0.001)
+        p['points'].append(JointTrajectoryPoint(positions=list(q), time_from_start=Duration(sec=int(p['t']), nanosec=int((p['t'] % 1.0) * 1e9))))
+        p['q'] = list(q)
+
+    def path_add_joint_move(self, q):
+        """a joint-space move from the end of the path so far to q, in steps of at most fuse_joint_step rad (the sim follows the waypoints in joint space)"""
+        p = self.path
+        step = float(self.cfg.get('fuse_joint_step', 0.05))
+        d = max(abs(a - b) for a, b in zip(q, p['q']))
+        n = max(1, math.ceil(d / step))
+        q0 = list(p['q'])
+        for i in range(1, n + 1):
+            self.path_point([a + (b - a) * i / n for a, b in zip(q0, q)], p['t'] + max(0.02, d / n / 0.6))
+        p['moves'] += 1
+
+    def path_abort(self, step, why, seed):
+        """a piece of the path could not be planned: the pieces go one by one as they would without fuse_moves (nothing has moved yet)"""
+        self.get_logger().warn(f"[{step['label']}] {why} -> the pieces are executed one by one")
+        self.seed = list(seed)
+        self.steps[0:0] = list(step['steps'])
+        self.run_next()
+
+    def path_send(self):
+        p = self.path
+        jt = JointTrajectory(joint_names=list(self.cfg['robot']['arm_joints']), points=p['points'])
+        self.get_logger().info(f"[{p['step']['label']}] one path: {p['moves']} moves, {len(p['points'])} points, {p['t']:.1f} s")
+        self.send_goal(self.exec_client, ExecuteTrajectory.Goal(trajectory=RobotTrajectory(joint_trajectory=jt)))
+
+    def follow_part(self, step, queue=None):
+        """transfer.follow_part_xy: the plate on the seat of the standard coordinate does not lie exactly at transfer.pick (it slides into the seat when it is let go):
+        the straight move down goes to where it really is (/target_part_pose, a few mm at most), the offset is logged. The gripper is not turned here: the plate is
+        turned to the jig when it is carried to the belt (align_yaw)"""
+        t = self.cfg.get('transfer') or {}
+        if not step.get('follow_part') or not t.get('follow_part_xy'):
+            return step
+        if self.follow is None:                                               # the first followed step of this transfer: where the plate lies
+            self.follow = (0.0, 0.0)
+            p = self.part_pose[0] if self.part_pose and time.time() - self.part_pose[1] < 2.0 else None
+            if p is None:
+                self.get_logger().warn('no pose of the plate at the standard coordinate (/target_part_pose): it is picked at transfer.pick')
+            else:
+                dx, dy = p.position.x - float(t['pick'][0]), p.position.y - float(t['pick'][1])
+                if math.hypot(dx, dy) > 0.03:
+                    self.get_logger().warn(f'the plate lies {math.hypot(dx, dy) * 1000:.0f} mm from transfer.pick: more than 30 mm, it is picked at transfer.pick')
+                else:
+                    self.follow = (dx, dy)
+                    self.get_logger().info(f'the plate at the standard coordinate lies {dx * 1000:+.1f} mm (x) / {dy * 1000:+.1f} mm (y) from transfer.pick -> picked there')
+        dx, dy = self.follow
+        v = step['value']
+        return {**step, 'follow_part': False, 'value': Pose(position=Point(x=v.position.x + dx, y=v.position.y + dy, z=v.position.z), orientation=v.orientation)}
 
     def plan_line(self, step):
         """Ask MoveIt for the straight line from where the arm is now to the pose of the step"""
@@ -916,11 +1192,13 @@ class SequenceNode(Node):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--robot', help='robot name (bringup/<robot>/ and isaacsim/configs/robots/<robot>.yaml); default: the robot of the sequence, '
-                                        'else `scene.robot` of map.yaml')
+    parser.add_argument('--robot', help='robot name (bringup/<robot>/ and isaacsim/configs/robot/<robot>.yaml); default: the robot of the sequence, '
+                                        'else scene.robot of the map')
     parser.add_argument('--sequence', help='sequence name = isaacsim/configs/sequence/<name>.yaml (poses, trajectory and what else differs for a robot)')
+    parser.add_argument('--map', help='map name = isaacsim/configs/map/<map>.yaml: only its robot is read (scene.robot, the default of --robot)')
     cli, ros_args = parser.parse_known_args(args)
-    cfg = load_config(robot=cli.robot, sequence=cli.sequence)
+    map_name = cli.map or sim_config.with_current(None, None)[1]        # without --map: the map of the running robot_sim.py
+    cfg = load_config(robot=cli.robot, sequence=cli.sequence, map_name=map_name)
     rclpy.init(args=ros_args)
     node = SequenceNode(cfg)
     try:

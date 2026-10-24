@@ -1,0 +1,10 @@
+# The map without map:= (lab robot_sim.py, ros2 launch robot.launch.py ...): the floor and the robots below. map:=none = the floor only; robot:=<name> = that robot alone.
+# Every robot has its own ROS domain id (di): robot_sim.py runs the nodes of each robot in its domain, so each one is controlled on its own:
+#   ros2 launch robot.launch.py di:=0          python3 control/ee_6d_di.py di:=0
+#   ros2 launch robot.launch.py di:=1          python3 control/ee_6d_di.py di:=1
+# pose = where the robot base stands [x, y, z (m), roll, pitch, yaw (deg)]. The machines of a map talk in the domain of the first robot.
+
+scene:
+  robots:
+    - {name: m710id_70, di: 0, pose: [0, 0, 0, 0, 0, 0]}
+    - {name: m710id_70, di: 1, pose: [2.4, 0, 0, 0, 0, 180]}

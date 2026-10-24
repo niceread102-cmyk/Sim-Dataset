@@ -1,6 +1,6 @@
 """Crates of parts stacked on pallets: where every crate and every part goes. numpy only (no Isaac Sim), the poses are in the world.
 
-    pallets:                        scene.pallets of configs/map/map.yaml
+    pallets:                        scene.pallets of a map (configs/map/<map>.yaml)
       items: [{pos_m: [x, y, deck_top_z], yaw_deg}, ...]      the pallets of the map that get crates
       crate: {size_m, inner_size_m, floor_z_m, gap_m, usd}    the crate (outer size x y z, usable floor x y, top of its floor)
       layers, grids, grid_mode, parts_per_crate, part, dynamic_layers, seed
@@ -33,6 +33,7 @@ DEFAULTS = {
     "layer_gap_m": 0.0005,          # between a crate and the crate below it
     "margin_m": 0.004,              # parts keep this far from the walls of the crate
     "tilt_deg": None,               # None = every part lies flat; {upright: [lo, hi], flipped: [lo, hi]} = a random tilt (deg) from lying flat, about a horizontal axis
+    "parallel": False,              # True = every part lies flat (upright or flipped at random), whatever tilt_deg says
 }
 
 
@@ -181,7 +182,7 @@ def plan_pallets(cfg: dict, part_ext, part_layer_rpy_deg, rng) -> dict:
     Rb = rpy_to_mat(part_layer_rpy_deg or [0, 0, 0])         # the part lying flat, thinnest side up
     ext = np.abs(Rb) @ np.asarray(part_ext, float)           # its size in that pose (exact for turns of 90 degrees)
     foot, height = (float(ext[0]), float(ext[1])), float(ext[2])
-    tilt = cfg.get("tilt_deg")
+    tilt = None if cfg.get("parallel") else cfg.get("tilt_deg")      # parallel: no tilt, every part level
     if tilt is not None and not isinstance(tilt, dict):                  # one range for upright and flipped parts
         tilt = {"upright": tilt, "flipped": tilt}
     if tilt:

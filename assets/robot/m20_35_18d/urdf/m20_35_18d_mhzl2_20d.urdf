@@ -227,12 +227,12 @@
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><mesh filename="../../../grippper/mhzl2_20d/meshes/M20iD35_MHZL2_extension_300mm.stl" scale="1 1 1"/></geometry>
-      <material name="extension_gray"><color rgba="0.55 0.57 0.60 1"/></material>
+      <geometry><mesh filename="../meshes/collision/extended_adapter_m20id.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="extension_steel"><color rgba="0.66 0.68 0.71 1"/></material>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><mesh filename="../../../grippper/mhzl2_20d/meshes/M20iD35_MHZL2_extension_300mm.stl" scale="1 1 1"/></geometry>
+      <geometry><mesh filename="../meshes/collision/extended_adapter_m20id.stl" scale="0.001 0.001 0.001"/></geometry>
     </collision>
   </link>
   <joint name="fanuc_flange_to_extension" type="fixed">
@@ -240,11 +240,11 @@
     <child link="m20_extension_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
-  <!-- MHZL2-20D gripper (assets/grippper/mhzl2_20d): its base_link on the end face of the extension (0.300 m) -->
+  <!-- MHZL2-20D gripper (assets/grippper/mhzl2_20d): its base_link on the end face of the extension (0.400 m) -->
   <joint name="extension_to_mhzl2" type="fixed">
     <parent link="m20_extension_link"/>
     <child link="mhzl2_base_link"/>
-    <origin xyz="0 0 0.300" rpy="0 0 0"/>
+    <origin xyz="0 0 0.400" rpy="0 0 0"/>
   </joint>
   <material name="body_gray">
     <color rgba="0.58 0.60 0.64 1" />
@@ -386,19 +386,18 @@
     <child link="mhzl2_tcp" />
     <origin xyz="0 0 0.15" rpy="0 0 0" />
   </joint>
-  <!-- PhoXi 3D Scanner M Gen3 on the OUTER side of the wrist (flange frame: x = tool direction, +z = side away from the forearm when the
-       tool points down). Mesh frame (STL, mm): x = long axis, y = depth (0 = mount side face, -67.9 = other side), z = height:
-       +z = window face (the two rounded windows at the ends), -z = mounting boss (x +-42, z down to -44.5; the thin pieces below it,
-       z -73..-112, are loose leftovers of the cones). The window face looks along the tool (mesh +z = flange +x), the boss points back at
-       the wrist, the long axis lies along flange y. The plate behind the boss (flange x 0.088..0.098) sits right in front of the J6 flange
-       face (x 0.09) and carries it 0.04..0.138 off the tool axis; the body (flange z 0.07..0.138, x 0.123..0.184) clears the gripper / extension (r 0.04).
-       Mass is an estimate (3 kg, box inertia of the housing). Collision = boxes (housing, boss, plate): the STL has 420k triangles.
-       Visual = the STL split in two files (objects/stl/PhoXi_3D_Scanner-M-Gen3-body.stl black, ...-lens.stl blue: the three windows on the +z face). -->
+  <!-- PhoXi 3D Scanner M Gen3 on its arm (camera bracket flange_m20id_arm.stl) at the J6 flange, on the OUTER side of the wrist (J6_link: x = tool direction,
+       +z = side away from the forearm when the tool points down). Both meshes are in meshes/collision/ (mm).
+       Bracket: z = tool direction; its plate lies on the flange face (bracket z -5.5 mm at J6_link x 0.09), the pad (bracket x 96..106, z 0..74) points to
+       J6_link +z. Scanner: its mount side face (mesh y 0, 4 x M4 at x +-22.5 / z 0 and -22) is screwed on the outer face of the pad (bracket x 106, holes
+       y +-22.5 / z 29.5 and 51.5); the window face (mesh +z) looks along the tool, the long axis lies along J6_link y.
+       Link frame = the scanner mesh; the bracket is in it at xyz (0 0.106 -0.0515), rpy (0 0 -90 deg). Mass is an estimate (3 kg).
+       Collision = boxes for the scanner (its STL has 420k triangles: housing, boss) + the bracket mesh. -->
   <link name="phoxi_scanner">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="../../../objects/stl/PhoXi_3D_Scanner-M-Gen3-body.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="../meshes/collision/PhoXi_3D_Scanner-M-Gen3-body.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="phoxi_body">
         <color rgba="0.025 0.027 0.03 1"/>
@@ -407,19 +406,19 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="../../../objects/stl/PhoXi_3D_Scanner-M-Gen3-lens.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="../meshes/collision/PhoXi_3D_Scanner-M-Gen3-lens.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="phoxi_lens">
         <color rgba="0.05 0.12 0.34 1"/>
       </material>
     </visual>
     <visual>
-      <origin xyz="0 -0.019 -0.05" rpy="0 0 0"/>
+      <origin xyz="0 0.106 -0.0515" rpy="0 0 -1.5707963267948966"/>
       <geometry>
-        <box size="0.084 0.098 0.010"/>
+        <mesh filename="../meshes/collision/flange_m20id_arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="phoxi_bracket">
-        <color rgba="0.06 0.065 0.07 1"/>
+        <color rgba="0.70 0.72 0.75 1"/>
       </material>
     </visual>
     <collision>
@@ -435,9 +434,9 @@
       </geometry>
     </collision>
     <collision>
-      <origin xyz="0 -0.019 -0.05" rpy="0 0 0"/>
+      <origin xyz="0 0.106 -0.0515" rpy="0 0 -1.5707963267948966"/>
       <geometry>
-        <box size="0.084 0.098 0.010"/>
+        <mesh filename="../meshes/collision/flange_m20id_arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -449,7 +448,7 @@
   <joint name="J6_to_phoxi_scanner" type="fixed">
     <parent link="J6_link"/>
     <child link="phoxi_scanner"/>
-    <origin xyz="0.143 0 0.07" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
+    <origin xyz="0.147 0 0.106" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
   </joint>
   <!-- Colour camera of the scanner: the round lens glass (mesh x -113.1, y -32.6, z 35.0 mm), as an OpenCV optical frame (x right, y down, z forward = the tool
        direction, flange +x): image right = flange -y, image down = flange -z (with the tool pointing down the robot base is at the bottom of the image, as seen
@@ -458,6 +457,6 @@
   <joint name="J6_to_phoxi_camera" type="fixed">
     <parent link="J6_link"/>
     <child link="phoxi_camera"/>
-    <origin xyz="0.178 0.1131 0.1026" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
+    <origin xyz="0.182 0.1131 0.1386" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
   </joint>
 </robot>

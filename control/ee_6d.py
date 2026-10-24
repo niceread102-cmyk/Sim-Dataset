@@ -12,16 +12,18 @@ from scipy.spatial.transform import Rotation
 
 DEFAULT_RPY = (180.0, 0.0, 0.0)
 SIM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # Simulation/
+sys.path.insert(0, os.path.join(SIM, 'isaacsim'))
+import sim_config  # noqa: E402  the maps and robots of isaacsim/configs/
 
 
-def lens_calibration(robot=None):
-    """(flange -> lens 4 x 4, TCP offset in the flange frame) of the robot: the pose of the link of wrist_camera (configs/robots/<robot>.yaml) in the
-    end frame of its ik_node.yaml, read from the URDF (a real robot: its hand-eye calibration), and the TCP offset of that ik_node.yaml"""
-    sys.path.insert(0, os.path.join(SIM, 'isaacsim'))
+def lens_calibration(robot=None, map_name=None):
+    """(flange -> lens 4 x 4, TCP offset in the flange frame) of the robot (robot:=, else scene.robot of the map:=): the pose of the link of wrist_camera
+    (configs/robot/<robot>.yaml) in the end frame of its ik_node.yaml, read from the URDF (a real robot: its hand-eye calibration), and the TCP offset of that ik_node.yaml"""
     import make_robot_config as mrc
-    robot = robot or yaml.safe_load(open(os.path.join(SIM, 'isaacsim', 'configs', 'map', 'map.yaml')))['scene']['robot']
-    ry = yaml.safe_load(open(os.path.join(SIM, 'isaacsim', 'configs', 'robots', f'{robot}.yaml')))
-    ik = yaml.safe_load(open(os.path.join(SIM, 'bringup', robot, 'config', 'ik_node.yaml')))
+    robot, map_name = sim_config.with_current(robot, map_name)              # without robot:= / map:= the ones of the running robot_sim.py
+    robot = sim_config.pick_robot(robot, sim_config.scene_of(map_name))
+    ry = sim_config.load_robot(robot)
+    ik = yaml.safe_load(open(os.path.join(sim_config.BRINGUP_DIR, robot, 'config', 'ik_node.yaml')))
     T = mrc.Urdf(mrc.find_urdf(robot)).relative_pose(ik['ee_link'], ry['wrist_camera']['link'])
     if T is None:
         raise RuntimeError(f"{ry['wrist_camera']['link']} is not held to {ik['ee_link']} by fixed joints in the URDF of {robot}")
@@ -98,7 +100,7 @@ def is_number(text):
 def main(args=None):
     rclpy.init(args=args)
     node = TargetPublisher()
-    robot = next((a[len('robot:='):] for a in sys.argv[1:] if a.startswith('robot:=')), None)    # python3 ee_6d.py robot:=<name> (default: scene.robot of map.yaml)
+    robot, map_name = sim_config.option(sys.argv[1:], 'robot'), sim_config.option(sys.argv[1:], 'map')    # python3 ee_6d.py [robot:=<name>] [map:=<map>] (default: scene.robot of the map)
     cal = None    # the lens calibration is read at the first `lens` command (robots without a wrist camera need none)
 
     try:
@@ -111,10 +113,10 @@ def main(args=None):
                 try:
                     x, y, z, *rest = map(float, user_input.split()[1:])
                     if cal is None:
-                        cal = lens_calibration(robot)
+                        cal = lens_calibration(robot, map_name)
                         print(f"lens calibration (flange -> lens): xyz {np.round(cal[0][:3, 3], 4).tolist()} m, TCP offset {cal[1].tolist()} m")
                     pos, r = lens_to_tcp(x, y, z, rest[0] if rest else 0.0, cal)
-                except (ValueError, RuntimeError, KeyError) as e:
+                except (ValueError, RuntimeError, KeyError, TypeError) as e:
                     print(f"lens x y z [yaw]: {e}")
                     continue
                 node.publish_target_quat(*pos, *r.as_quat())

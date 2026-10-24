@@ -35,9 +35,9 @@ All the commands below start in this `Simulation` folder.
 
 | folder | what it does |
 |---|---|
-| `assets/` | robot URDF and meshes (one folder per robot) and the objects (`assets/objects/stl/`: STL files, `assets/objects/usd/`: USD assets made in the Isaac Sim GUI) |
+| `assets/` | robot URDF and meshes (one folder per robot) and the objects (`assets/object/stl/`: STL files, `assets/object/usd/`: USD assets made in the Isaac Sim GUI) |
 | `isaacsim/` | Isaac Sim scripts and configs |
-| `bringup/` | MoveIt 2 config and launch, one folder per robot |
+| `bringup/` | MoveIt 2 config, one folder per robot, and the launch of every robot (`bringup/integration/launch/robot.launch.py`) |
 | `control/` | robot control nodes (target pose input, pick & place sequence) |
 
 Scripts in `isaacsim/`:
@@ -49,7 +49,9 @@ Scripts in `isaacsim/`:
   again to resume.
 - `make_robot_config.py`: reads a robot URDF from `assets/robot/` and writes the robot yaml and the MoveIt
   bringup folder.
-- `make_object_config.py`: reads an object STL from `assets/objects/stl/` and writes its part config yaml.
+- `make_object_config.py`: reads an object STL from `assets/object/stl/` and writes its part config yaml.
+- `check_reach.py`: without Isaac Sim, whether the robot reaches the parts (or the crate floors) of the top layer of the pallets of a map.
+- `sim_config.py`: finds and reads the maps, robots and machines of `configs/` (used by all the scripts, the launch and the control nodes).
 
 ## Shortcuts used below
 
@@ -65,25 +67,29 @@ The steps below are written with the long form, so they work without the aliases
 ## Settings (`isaacsim/configs/`)
 
 All the settings are yaml files here, so the robot, the objects and the scene are changed without touching the code.
+Robots, maps and machines are independent of each other: a robot yaml is the same in every map, a map names its robot only as a default.
 
 | folder / file | what you can change |
 |---|---|
-| `robots/<name>.yaml` | one file per robot (made by `make_robot_config.py`): base position, start pose (`joint_pos`), joint drive `stiffness` / `damping`, `speed`, `physics_hz`, gripper, controller name |
+| `robots/<name>.yaml` | one file per robot (made by `make_robot_config.py`), the same in every map: start pose (`joint_pos`), joint drive `stiffness` / `damping`, `speed` (simulation), `velocity_scaling` / `acceleration_scaling` (MoveIt), `joint_limits_deg` (narrower joint limits), `physics_hz`, gripper, controller name. `pos_m` / `rpy_deg` are 0: where the robot stands is the map's |
+| `map/<map>.yaml` | one file per map (`map:=<map>`), a map of its own: its robot (`scene.robot`) and where it stands (`scene.robot_pose`), the environment USD of `assets/map/` (`scene.map`), pallets with crates and parts (`scene.pallets`, with the physics per layer), machines (`scene.machines`: name + where it stands), objects, bin, basket, platform. Without `map:=` the robot stands alone on the floor |
+| `machines/<name>.yaml` | one file per machine (the laser marker, the conveyor), the same in every map: URDF, materials, collision, speeds, carriers (belt / chain), friction of the jigs (read again while the sim runs), the parameters of its cycle node (`isaacsim/machine/<name>.py`) |
 | `objects/<name>.yaml` | one file per object (made by `make_object_config.py`): `mass_kg`, `friction`, `restitution`, collision shape (`collision`: convexDecomposition / convexHull / sdf, `max_convex_hulls`), `color`, `roughness`, `metallic`, `units`, symmetry, grasp points |
 | `objects/bin.yaml` | the bin: mesh, size, colour, collision |
-| `map/map.yaml` | the scene and the data generation: which objects (`parts:`), the bin, how the pile is made (`loading:`), taking parts out while shooting (`loading.pick`), lights (`randomization:`), output folders (`outputs:`), `run:` (number of scenes, views, output folder) |
+| `map/map.yaml` | the data generation (not a map): which objects (`parts:`), the bin, how the pile is made (`loading:`), taking parts out while shooting (`loading.pick`), lights (`randomization:`), output folders (`outputs:`), `run:` (number of scenes, views, output folder) |
 | `cameras/*.yaml` | camera presets: intrinsics, mount height, depth sensor noise (`camera.noise`) |
-| `sequence/*.yaml` | pick & place sequence: approach distance, delays, tolerances |
+| `sequence/*.yaml` | pick & place sequence: the task on a map (place poses, transfer, waits, trajectory), approach distance, tolerances |
 
-Terms: an **object** is the thing itself (the STL in `assets/objects/stl/`); its **part config** is the yaml in
-`configs/objects/` that tells the simulator how it behaves (rigid body, collision, colour).
+Terms: an **object** is the thing itself (the STL in `assets/object/stl/`); its **part config** is the yaml in
+`configs/object/` that tells the simulator how it behaves (rigid body, collision, colour).
 
 Any value can also be changed for one run on the command line with `key=value`, for example
 `lab generate_isaacsim.py obj:=SIDE-PLATE camera.noise.enabled=false`.
 
-Only the robot and the floor, without the bin and objects of `map.yaml`:
+Only the robot and the floor (no `map:=`), or the robot in a map:
 ```bash
-lab robot_sim.py robot:=<name> --robot-only
+lab robot_sim.py robot:=<name>
+lab robot_sim.py map:=<map> [robot:=<name>]        # the robot of the map when robot:= is not given
 ```
 
 The next two sections are independent: a robot can run without any object, and the data can be generated without a robot.
@@ -102,12 +108,12 @@ Example: `ur3e`
    cd ../..
    ```
 3. Put the URDF and meshes in it. The URDF file must be named after the folder, and the meshes
-   are found relative to it:
+   are found relative to it (or as `package://<pkg>/...` in it or a folder above it, as xacro writes them):
    ```
    assets/robot/ur3e/urdf/ur3e.urdf
    assets/robot/ur3e/meshes/...
    ```
-4. Generate the robot config (robot yaml in `isaacsim/configs/robots/`, MoveIt files in `bringup/ur3e/`):
+4. Generate the robot config (robot yaml in `isaacsim/configs/robot/`, MoveIt files in `bringup/ur3e/`):
    ```bash
    conda activate sim
    cd isaacsim
@@ -122,7 +128,7 @@ You need three terminals. Keep all three open while the robot runs, and start th
 ```bash
 conda activate sim
 cd isaacsim
-~/IsaacLab/isaaclab.sh -p robot_sim.py robot:=ur3e        # = lab robot_sim.py robot:=ur3e
+~/IsaacLab/isaaclab.sh -p robot_sim.py robot:=ur3e        # = lab robot_sim.py robot:=ur3e   (add map:=<map> for a map)
 ```
 Wait until the Isaac Sim window is open and shows the robot. The first run of a new robot converts the
 URDF to USD and caches it in `isaacsim/assets_cache/`, which takes a few minutes. It is not frozen,
@@ -132,7 +138,7 @@ do not close it. Later runs start much faster.
 ```bash
 source /opt/ros/jazzy/setup.bash
 cd bringup/integration/launch
-ros2 launch robot.launch.py robot:=ur3e
+ros2 launch robot.launch.py robot:=ur3e        # the same map:=<map> as Isaac Sim, if any: MoveIt then has the robot where the map puts it
 ```
 Start it after the robot appears in Isaac Sim.
 
@@ -153,26 +159,42 @@ The robot moves to the target (IK + MoveIt). If the target is outside the robot'
 Check the robot's reach first.
 
 To run the whole pick & place sequence instead (approach, straight-line insert, gripper, home, place),
-start Terminal 2 with the name of a sequence of this robot (`isaacsim/configs/sequence/<name>.yaml`, one per robot, it names its
-robot and has its poses and trajectory):
+start Terminal 2 with a sequence (`isaacsim/configs/sequence/<name>.yaml`: the task on a map, what differs for one robot under `robots:`);
+`sequence:=true` = the sequence of the map (`scene.sequence`). With a sequence the cycles of the machines of the map run too (`machines:=false` = not):
 ```bash
-ros2 launch robot.launch.py robot:=ur3e sequence:=ur3e
+ros2 launch robot.launch.py map:=SIDE_PLATE_MAP robot:=ur3e sequence:=side_plate
 ```
-The robot then moves to its home pose (its start pose, `joint_pos` of `isaacsim/configs/robots/<robot>.yaml`) when the launch has
+The robot then moves to its home pose (its start pose, `joint_pos` of `isaacsim/configs/robot/<robot>.yaml`) when the launch has
 started, and every target you type runs one sequence: it picks the part, lets go of it at `poses.place`, returns to the home pose and
-waits for the next target. The sequence uses only the robot's own files, nothing of the scene.
+waits for the next target. Of the map the sequence reads only its robot; the speed of the arm is the robot's (`velocity_scaling` /
+`acceleration_scaling` of its yaml).
 
 <!-- add a screenshot or gif here -->
+
+## Add a map
+
+A map is one yaml in `isaacsim/configs/map/` (e.g. `Orange.yaml`), a map of its own (no other map is read):
+```yaml
+scene:
+  robot: r2000ic_125l                         # the robot of this map (robot:= on the command line wins)
+  robot_pose: [0, 0, 0, 0, 0, 0]              # where the robot base stands [x, y, z, roll, pitch, yaw] (default 0)
+  map: null                                   # an environment USD of assets/map/ (made in the Isaac Sim GUI), null = only the floor
+  pallets: {...}                              # crates (a USD of assets/object/usd/ or a box of configs/object/) with or without parts
+  machines:                                   # configs/machine/<name>.yaml + where it stands here
+    - {name: laser_marker, pos_m: [x, y, z], rpy_deg: [0, 0, yaw]}
+```
+Start everything with the same `map:=<map>`: `lab robot_sim.py map:=<map>`, `ros2 launch robot.launch.py map:=<map>`,
+`python3 control/ee_6d.py map:=<map>`, `python3 isaacsim/check_reach.py map:=<map>` (the reach of the robot to the top layer of the pallets).
 
 ## Add an object and generate data
 
 Example: `SIDE-PLATE.stl`
 
-1. Put the STL file in `assets/objects/stl/`:
+1. Put the STL file in `assets/object/stl/`:
    ```
-   assets/objects/stl/SIDE-PLATE.stl
+   assets/object/stl/SIDE-PLATE.stl
    ```
-2. Make the part config. It is written to `isaacsim/configs/objects/side_plate.yaml`
+2. Make the part config. It is written to `isaacsim/configs/object/side_plate.yaml`
    (unit mm, mass from the mesh volume, steel-like metal; the size, mass and an estimate of how many parts fit in the bin are printed):
    ```bash
    conda activate sim
@@ -185,7 +207,7 @@ Example: `SIDE-PLATE.stl`
    ```bash
    lab generate_isaacsim.py obj:=SIDE-PLATE obj_num:=100 scenes:=2 views:=30 out:=~/Downloads/side_plate_data
    ```
-   - `obj:=` the part (name of its yaml in `configs/objects/`)
+   - `obj:=` the part (name of its yaml in `configs/object/`)
    - `obj_num:=` parts per bin (default: the estimate written in the part yaml)
    - `scenes:=` number of piles (one pile = one camera cycle)
    - `views:=` images per pile, so `scenes x views` images in all (here 2 x 30 = 60)

@@ -1,5 +1,7 @@
 # robot_sequence.py for the side plate map (SIDE_PLATE_MAP): the task on this map, in the world coordinates of the map, the same for every robot.
-#   ros2 launch robot.launch.py robot:=<robot> sequence:=side_plate
+#   ros2 launch robot.launch.py map:=SIDE_PLATE_MAP [robot:=<robot>] sequence:=side_plate
+# Only the task is here: the speeds are the robot's (configs/robot/<robot>.yaml) and the machines' (configs/machine/<name>.yaml),
+# the physics of the pallets is scene.pallets.physics of the map.
 # What differs for one robot goes under `robots:` (key = the robot name, any key of this file, e.g. trajectory:).
 target: tcp                                # /target_pose is the TCP of the grip: paste the SECOND line robot_sim.py prints for a clicked part ("x y z roll pitch yaw standard|turn_over") into ee_6d.py;
                                            # the word at its end is the state of the part (poses.place below). `object` would expect the FIRST line (the pose of the part) and work the state out itself
@@ -17,65 +19,6 @@ transfer:                                     # when the part lies at the standa
   align_yaw: true                             #   the plate that lies within 8 cm of `pick` (the standard coordinate) is measured (position + yaw, from the simulation): it is gripped there and turned to the yaw of `place` (0) while it is carried to the jig; false = grip at `pick` as it is
   pick:  [-0.512, -0.658, 1.0625, 180, 0, 0]  #   TCP at the plate on the boss of seat_standard (hub up): flange bottom on the boss top z 1.052 -> the centre of the plate (= the TCP) 10.5 mm above it
   place: [-0.972, -0.658, 1.0070, 180, 0, 0]  #   carrier_3 of the belt at rest (slot y 0.25 of laser_marker_v2.urdf -> world x -0.9723): the belt is 18 mm lower (pads in the slits): the prongs of the jig of the carrier reach z 0.9938, the flange bottom is 3 mm above them
-
-speeds:                                       #   ALL speeds of the cell in one place. robot_sim.py reads them at start (scene.speeds_file of configs/map/SIDE_PLATE_MAP.yaml): restart it after a change; the planning speed of the arm is read by this sequence
-  m20_35_18d_mhzl2_20d:                       #   the robot arm
-    joints: 0.9                               #   simulation: max joint speed = this x the URDF velocity limit
-    velocity_scaling: 0.1                     #   MoveIt planning: share of the joint speed limits (1.0 = full); the slower of this and `joints` wins
-    acceleration_scaling: 0.1                 #   MoveIt planning: share of the acceleration limits
-    arrive_tolerance_rad: 0.01                #   the arm has arrived when every joint is this close to the goal (rad) ...
-    arrive_settle_frames: 18                  #   ... and has not moved for this many simulation frames (frames of the simulation loop, about 1/25 s each): the wait after every move
-    gripper_grace_frames: 18                  #   gripper: frames of start-up before it is judged (reached / blocked)
-    gripper_window_frames: 18                 #   gripper: frames without travel that count as blocked (the jaws on the part): the wait after every open / close
-  laser_marker:                               #   laser marker (the machine of configs/map/map.yaml)
-    belt_mps: 0.2                             #   its belt (the carriers): m/s while it moves; one pitch = 0.36 m
-    belt_accel_mps2: 0.5                      #   how softly the belt starts and stops (m/s^2; plates slide above ~4.9)
-    flipper_gripper: 9.0                      #   flipper rotor + its jaws: x URDF limit (rotor 0.8 rad/s, jaws 0.03 m/s)
-    two_arm_gripper: 9.0                      #   left rotor + the two pairs of hands (jaws): x URDF limit
-    flipper_close_mm: 6.0                     #   how far PAST the pocket the flipper jaws are told to close (mm; max 10): the harder they press the plate (5 mm = ~27 N per jaw, 7 mm = ~38 N)
-    two_arm_close_mm: 6.0                     #   the same for the two pairs of hands
-    rotor_damping: 1.0                        #   rotor drives: damping (N*m*s/deg): it caps the speed of a rotor at (URDF effort 300 N*m) / damping = 300 deg/s (2.5 capped it at 120 deg/s = 2.1 rad/s: a factor above that did nothing)
-    rotor_accel_rad_s2: 8.0                   #   rotors (flipper, hands): acceleration of start / stop
-    jaw_accel_m_s2: 0.5                       #   jaws: acceleration of start / stop
-    stall_frames: 25                          #   frames without motion after which a jaw / rotor that does not arrive counts as blocked (= holding the plate): the wait after every close
-  conveyor:                                   #   the other conveyor, left of the laser marker
-    chain_mps: 0.2                            #   its chain of jigs: m/s while it moves; one pitch = 0.1 m
-    chain_accel_mps2: 0.5                     #   how softly the chain starts and stops (m/s^2)
-
-fixtures:                                     # the jigs the plates sit on: read again by robot_sim.py WHILE IT RUNS (save the file: no restart)
-  laser_marker:                               #   the four jigs of the belt
-    friction: 0.08                            #     friction of the prongs / ring: low = the plate slides down the sloped prongs into the windows (oiled); high = it stays where it lies. Seated plates are held by the prongs either way
-    friction_moving: 0.5                      #     while the belt moves: high = the plates ride along and do not slip off (needs about a / 9.8 = 0.05 at 0.5 m/s^2)
-  conveyor:                                   #   the jigs of the chain
-    friction: 0.08
-    friction_moving: 0.5
-
-pallets:                                     # the physics of the crates and plates, per pallet and layer (0 = bottom; read by robot_sim.py at start: restart it after a change). The crates are always there and stacked (visible);
-                                             #   physics: true  = the crates and plates of the layer have colliders, the plates are real bodies (gravity, contacts: they can be picked, they fall when their crate is removed)
-                                             #   crates: [..]   = (optional) only these crates of the layer: the crate that the wrist camera looks at (pallet 1, crate 2 = x 0.214 y -0.742, the home pose). The other crates of the layer
-                                             #                     are like physics: false (no collider at all). Without `crates:` all crates of the layer
-                                             #   physics: false = no collider at all, not even a static one (the plates are fixed in their crates): nothing is calculated, the robot passes through them. z_m = bottom / rim of the crates (info)
-  - pallet: 0
-    layers:
-      - {layer: 0, z_m: [0.1200, 0.3200], physics: false}
-      - {layer: 1, z_m: [0.3205, 0.5205], physics: false}
-      - {layer: 2, z_m: [0.5210, 0.7210], physics: false}
-      - {layer: 3, z_m: [0.7215, 0.9215], physics: false}
-      - {layer: 4, z_m: [0.9220, 1.1220], physics: false}
-      - {layer: 5, z_m: [1.1225, 1.3225], physics: false}
-  - pallet: 1
-    layers:
-      - {layer: 0, z_m: [0.1200, 0.3200], physics: false}
-      - {layer: 1, z_m: [0.3205, 0.5205], physics: false}
-      - {layer: 2, z_m: [0.5210, 0.7210], physics: false}
-      - {layer: 3, z_m: [0.7215, 0.9215], physics: false}
-      - {layer: 4, z_m: [0.9220, 1.1220], physics: false}
-      - {layer: 5, z_m: [1.1225, 1.3225], physics: true, crates: [2]}   # the crate under the camera
-
-hands:                                       # the two-arm gripper: it takes the plates over to the conveyor by itself when a plate lies in front of each of its two hand pairs, then waits for the next two (robot_sim.py looks, laser_marker.py acts)
-  slots_xy: [[-2.0523, -0.6579], [-1.6923, -0.6579]]   #   world x y in front of hand pair 1 and 2 (the belt slots 0 and 1: y 0.36 m apart)
-  radius: 0.03                               #   a plate within this distance (m) of the place counts
-  z: [0.9, 1.2]                              #   and its centre between these heights (m)
 
 waits:                                        #   seconds to wait AFTER a step, when it is done, before the next one starts (0 = at once). pick + place of a part:
   close_gripper_start: 0.0                    #   the gripper closes at the start of the sequence

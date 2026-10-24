@@ -1,5 +1,5 @@
 # Parameters of control/ik_node.py for the UR5e (python3 control/ik_node.py --config bringup/ur5e/config/ik_node.yaml).
-base_frame: world   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts pos_m / rpy_deg of configs/robots/<name>.yaml into MoveIt's URDF)
+base_frame: world   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts where the robot stands in the map, scene.robot_pose, into MoveIt's URDF)
 group_name: ur_manipulator        # config/ur5e.srdf
 ee_link: tool0                    # z axis = tool direction, so rpy (180, 0, 0) = tool pointing down
 arm_joints: [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]
@@ -10,17 +10,11 @@ tcp_offset: [0.0, 0.0, 0.0]       # m, TCP in the ee_link frame (no gripper: too
 # first IK of control/robot_sequence.py).
 ik_seed_deg: [0, -90, 90, -90, -90, 0]
 
-# Speed: fraction of the limits MoveIt uses (velocity from the URDF, acceleration from config/joint_limits.yaml)
-velocity_scaling: 0.15
-acceleration_scaling: 0.05
-
-# Optional: narrower range per joint (deg) than the URDF; an IK solution outside it is refused. Example:
-# joint_limits_deg: {shoulder_pan_joint: [-170, 170], elbow_joint: [-150, 150]}
-joint_limits_deg: {}
+# Speed (velocity_scaling, acceleration_scaling) and narrower joint limits (joint_limits_deg) are the robot's: isaacsim/configs/robot/ur5e.yaml
 
 # Joints that can turn more than a full turn (position range wider than 360 deg in the URDF) and that range (deg). The IK can
 # return the angle of such a joint a full turn off (q +- 360) and the arm would spin once round to reach it: ik_node sends the
-# equivalent angle nearest to the current one (inside this range and joint_limits_deg). Joints not listed are sent as solved.
+# equivalent angle nearest to the current one (inside this range and joint_limits_deg of the robot yaml). Joints not listed are sent as solved.
 wrap_joints_deg:
   shoulder_pan_joint: [-360, 360]
   shoulder_lift_joint: [-360, 360]

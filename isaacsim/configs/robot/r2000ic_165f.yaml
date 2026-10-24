@@ -1,0 +1,19 @@
+# lab robot_sim.py robot:=r2000ic_165f    (URDF: ../../../assets/robot/<name>/urdf/<name>.urdf, MoveIt: ros2 launch robot.launch.py robot:=r2000ic_165f). Only the robot is here:
+# what stands around it is the map (configs/map/<map>.yaml, map:=<map>), which names its robot too (scene.robot).
+name: r2000ic_165f
+gripper: none
+gripper_topic: /gripper/command   # std_msgs/Float64: 0 = closed, 1 = open (in between: partly open)
+gripper_material: null   # gripper look (converted URDF colours are plastic-like:
+                                  # metallic 0, roughness 0.5); lower roughness = shinier; null = as converted
+pos_m: [0.0, 0.0, 0.0]            # mount of the robot base (m) = 0 for every robot: where it stands in a map is scene.robot_pose of the map
+rpy_deg: [0, 0, 0]
+joint_pos: {}                     # start pose (rad), e.g. {J2: 0.3, J3: -0.2}; joints not listed: 0
+stiffness: 20000                  # joint drives, N*m/deg (prismatic: N/m) (lite6 script: 1600 / 80). Higher = less sag
+damping: 1000                     # higher = less swinging, slower settling
+speed: 0.3                        # max joint speed = speed x URDF velocity limit
+velocity_scaling: 0.15            # MoveIt (ik_node.py, robot_sequence.py): share of the joint velocity limits the motions use (1.0 = full)
+acceleration_scaling: 0.05        # MoveIt: share of the acceleration limits (bringup/<robot>/config/joint_limits.yaml)
+joint_limits_deg: {}              # narrower position range per joint than the URDF (deg), e.g. {J1: [-90, 90]}: MoveIt plans and solves the IK inside it (the start pose has to be inside too)
+physics_hz: 60                    # physics steps per simulated second (Isaac Sim default 60, dataset generator 200). Higher = parts and
+                                  # the gripper fingers sink into each other less, but every step costs time (the sim loop is already slow)
+controller: /r2000ic_165f_traj_controller  # <controller>/joint_trajectory, <controller>/follow_joint_trajectory

@@ -1,0 +1,32 @@
+# SIDE-PLATE: made by make_object_config.py from assets/object/stl/SIDE-PLATE.stl (mm).
+name: side_plate
+mesh: ../../../assets/object/stl/SIDE-PLATE.stl   # 55.6 x 55.6 x 20.9 mm, not watertight (PhysX warns)
+units: mm
+recenter: true            # move the model origin to its bounding-box center (BOP models are centered)
+mass_kg: 0.047        # the real part weighs 47 g (the volume 17.0 cm^3 x 7.85 g/cm^3 = 133 g is the solid CAD block)
+friction: 0.5
+restitution: 0.0
+# physx (stiff contact for a finger pushing hard on the thin 2-3 mm hole wall): robot_sim.py CLICK_PHYSX applies it to the clicked part only. On every part (~120 free ones) it made the sim crawl.
+# physx:
+#   solver_position_iterations: 16
+#   solver_velocity_iterations: 2
+#   max_depenetration_velocity: 0.5   # m/s
+#   enable_ccd: true
+collision: convexDecomposition   # convexDecomposition | convexHull | sdf (most accurate, slowest)
+max_convex_hulls: 32
+color: [0.285714, 0.285711, 0.285711]
+color_tint: [0.660232, 0.660225, 0.660225]
+roughness: 0.5
+metallic: 1.0   # steel-like, as side_plate_bp
+count: [180, 201]   # parts per bin (rough: 40 % of the bin volume). Used by `obj:=` of generate_isaacsim.py; map.yaml's count wins
+
+# symmetry: {axis: [0, 0, 1], order: 2, flip: false}   # a part that maps onto itself (BOP symmetries); none = not symmetric
+
+# Thinnest side of the bounding box up when the parts are stacked in layers (loading.mode: layers).
+layer_rpy_deg: [0, 0, 0]
+
+grasps:
+  # Suction points sampled automatically on flat patches of the mesh (stored in the asset cache).
+  suction_auto: {num: 48, seed: 0}
+  suction: []               # - {pos: [0, 0, 0.005], normal: [0, 0, 1]}
+  parallel_jaw: []          # - {pos: [0, 0, 0], rpy_deg: [0, 0, 0], width_m: 0.03}

@@ -1,0 +1,78 @@
+# robot_sequence.py for the side plate map (SIDE_PLATE_MAP): the task on this map, in the world coordinates of the map, the same for every robot.
+#   ros2 launch robot.launch.py map:=SIDE_PLATE_MAP [robot:=<robot>] sequence:=side_plate_test
+# Only the task is here: the speeds are the robot's (configs/robot/<robot>.yaml) and the machines' (configs/machine/<name>.yaml),
+# the physics of the pallets is scene.pallets.physics of the map.
+# What differs for one robot goes under `robots:` (key = the robot name, any key of this file, e.g. trajectory:).
+target: tcp                                # /target_pose is the TCP of the grip: paste the SECOND line robot_sim.py prints for a clicked part ("x y z roll pitch yaw standard|turn_over") into ee_6d.py;
+                                           # the word at its end is the state of the part (poses.place below). `object` would expect the FIRST line (the pose of the part) and work the state out itself
+poses:
+  place:                                      # where the part is let go of (TCP, tool pointing down), by the state of the part (found out from its pose)
+    standard:  [-0.512, -0.658, 1.070, 180, 0, 0]   # laser_marker_v2: the plate (hub up) on the boss of seat_standard: the top of the boss is z 1.052, the plate centre (= the TCP) rests 10.5 mm above it = 1.0625, it is let go 7.5 mm above (1.064 / 1.061 of the first laser marker sank into the carrier and the part stuck to the gripper).
+                                                    #   The flipper side of v2 is 0.1 m further out than in the first laser marker: x -0.612 -> -0.512
+    turn_over: [-0.312, -0.658, 1.006, 180, 0, 0]   # laser_marker_v2 (x -0.412 -> -0.312: seat_turn_over of the flipper is 0.1 m further out, the same top z 0.997). 5 mm above the seat (0.990 = seated).
+                                                    #   x y = the centre of the 55.5 mm round pocket; turn_over = hub down, put on the seat of the flipper (ring, pin and two prongs): the pin goes into the bore,
+                                                    #   the prongs into the two windows of the flange. Fitted by testing the two meshes against each other: the tool yaw 0 (rpy 180 0 0) is right (+-0.5 deg), seated at z 0.9898
+  place_offset: 0.3                           # the arm first goes to the place pose raised by 0.3 m in z, then straight down 0.3 m to it (like approach + insert of a pick)
+  carry_z: 1.55                               # m, TCP: with the part straight up to this height above where it was picked, then straight on to above the place pose
+                                              #   (not via home); home is reached from / left to this height straight up and down too. Above the stacks (top rim 1.27) and the laser
+                                              #   marker: the home of a lower layer is low, a line from there to standard / turn_over cut past the marker table
+
+transfer:                                     # when the part lies at the standard coordinate (put there, or turned over to it by the flipper) the arm picks it up again and puts it on the belt:
+                                              # straight from there (not via home) to the carrier next to it, raised by poses.place_offset first, then down
+  align_yaw: true                             #   the plate that lies within 8 cm of `pick` (the standard coordinate) is measured (position + yaw, from the simulation): it is gripped there and turned to the yaw of `place` (0) while it is carried to the jig; false = grip at `pick` as it is
+  stay_over_standard: true                    #   a part that the robot puts on the standard coordinate: after the release it only lifts (poses.place_offset) and stays there; the transfer goes straight down again (no home in between). A part put on the turn_over coordinate: see stay_over_turn_over
+  stay_over_turn_over: true                   #   a part put on the turn_over coordinate too: after the release the arm lifts and goes straight over to above the standard coordinate
+                                              #   (not home) and waits there while the flipper turns the part over onto the standard seat; the transfer then goes straight down
+  follow_part_xy: true                        #   the straight move down to the plate at the standard coordinate goes to where the plate really lies (from /target_part_pose, at most 30 mm from `pick`): the plate slides a few mm in the seat when it is let go. The offset is logged
+  pick:  [-0.512, -0.658, 1.0625, 180, 0, 0]  #   TCP at the plate on the boss of seat_standard (hub up): flange bottom on the boss top z 1.052 -> the centre of the plate (= the TCP) 10.5 mm above it
+  place: [-0.972, -0.658, 1.0070, 180, 0, 0]  #   carrier_3 of the belt at rest (slot y 0.25 of laser_marker_v2.urdf -> world x -0.9723): the belt is 18 mm lower (pads in the slits): the prongs of the jig of the carrier reach z 0.9938, the flange bottom is 3 mm above them
+
+waits:                                        #   seconds to wait AFTER a step, when it is done, before the next one starts (0 = at once). pick + place of a part:
+  close_gripper_start: 0.0                    #   the gripper closes at the start of the sequence
+  approach: 0.0                               #   arrived above the part
+  insert: 0.0                                 #   gone down into the bore (the jaws are still closed)
+  open_gripper: 0.0                           #   the jaws are open, expanded in the bore: the part is held
+  rise: 0.0                                   #   straight up again with the part
+  home: 0.0                                   #   back at home (between pick and place)
+  place: 0.0                                  #   above the place pose (standard / turn_over), raised by poses.place_offset
+  lower: 0.0                                  #   gone down to the place pose
+  release: 0.2                                #   the jaws have closed: the part is let go of (the arm waits so that the jaws are free of it before it lifts)
+  lift: 0.0                                   #   straight up again, without the part
+  return_home: 0.0                            #   back at home
+  transfer:                                   #   the same keys again for the transfer from standard to the belt (missing key = the value above)
+    release: 0.2
+
+fuse_moves: true                              # the moves between two gripper steps are ONE trajectory (robot_sequence.py fuse_steps): the arm goes through home / above the place pose
+                                              #   without stopping. approach+insert | open | rise+home+place+lower | close | lift+return home. false = every step is a move of its own (stop + wait in between)
+fuse_joint_step: 0.05                         # rad: a joint-space piece of such a path (home, via) is cut into waypoints of at most this size
+
+trajectory:                                   # the way between home and place (world, TCP, tool down; place = the pose raised by place_offset): a straight line, no via waypoint.
+  place: line                                 # If the line is not possible (out of reach, the arm would jump to another configuration) it falls back to a joint goal.
+  home: line                                  # the moves to and from home (via poses.carry_z) and between the crates: straight lines
+
+robots:                                       # what differs for one robot (key = the robot name; any key of this file)
+  m20_35_18d_mhzl2_20d:
+    crate: {size: [0.4516, 0.3042], yaw: 45, margin: 0.02, floor_z: 1.0849, layers: 6, layer_pitch_m: 0.190, clear_topic: /crate_clear, next_topic: /crate_next, ready_topic: /crate_ready, active_topic: /crate_active, settle_s: 1.0}
+                                                 # vision_pick.py (pick_filter.py): what every crate of `crates:` has: only its inner floor (minus margin m from the walls;
+                                                 #   floor_z = crate bottom 1.07 of the top layer + floor 0.0149) is looked at, the rest of the image is blacked out.
+                                                 #   layers: the crates: below are emptied layer by layer, from the top (6) down to the bottom one, each layer_pitch_m lower (= the crate
+                                                 #   height 0.200 - 0.010 they nest: pallets.layer_gap_m of the map); when a layer is done the arm goes on with the layer
+                                                 #   below (robot_sim.py hides the emptied layer: its crates and colliders off). After the bottom layer vision_pick.py ends
+                                                 #   clear_topic: nothing detected in the crate any more -> vision_pick.py publishes it there (std_msgs/String, json, latched);
+                                                 #   next_topic: then the number of the next crate (std_msgs/Int32) -> robot_sequence.py makes its `home` the home pose (= the scan pose)
+                                                 #   and goes there -> ready_topic (std_msgs/Int32, -1 = it could not get there) -> vision_pick.py picks from that crate. After the last one (of the bottom layer) it ends
+                                                 #   active_topic: at the same time the crate (json: index, centre, floor_z) -> robot_sim.py gives it and its parts physics, the one before none
+                                                 #   (map: pallets.physics `switch: true`); settle_s = wait at its scan pose before the picture
+    crates:                                      # the crates of the top layer of pallet 1 in the order they are emptied (0 first). centre = the crate (x y, world m; binsim/pallets.py),
+                                                 #   home = the scan pose above it: the wrist camera over the centre (TCP = centre - [0.1531, 0.0072], yaw 45 like crate 0, lens 0.74 m above the parts)
+      - {centre: [0.2141, -0.7418], home: [0.061, -0.749, 1.4855, 180, 0, 45]}      # 0: pallet 1, crate 2 (= poses.home)
+      - {centre: [0.4736, -1.0014], home: [0.3205, -1.0086, 1.4855, 180, 0, 45]}    # 1: crate 1
+      - {centre: [0.7332, -1.2609], home: [0.5801, -1.2681, 1.4855, 180, 0, 45]}    # 2: crate 0
+      - {centre: [0.5832, -0.3727], home: [0.4301, -0.3799, 1.4855, 180, 0, 45]}    # 3: crate 5
+      - {centre: [0.8428, -0.6322], home: [0.6897, -0.6394, 1.4855, 180, 0, 45]}    # 4: crate 4
+      - {centre: [1.1023, -0.8918], home: [0.9492, -0.8990, 1.4855, 180, 0, 45]}    # 5: crate 3
+    poses:
+      home: [0.061, -0.749, 1.4855, 180, 0, 45]   # scan pose = home: the wrist camera (lens z 1.9 m, 0.74 m above the parts) looks straight down at the centre of a crate of the top layer:
+                                                 #   pallet 1, crate 2 (x 0.214 y -0.742 of scene.pallets; 25 gears, next to crate 5 with 150), its long side along the image x axis (yaw 45).
+                                                 #   From ee_6d.py's `lens 0.214 -0.742 1.9 225`; IK checked: J = 100 -15 -39 0 -67 35 deg. vision_pick.py takes its picture here.
+                                                 #   `ready` (the start pose of the robot) is the default home

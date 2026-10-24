@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """End-effector target node for any robot arm (any number of joints); everything robot specific is in a yaml.
 
-    python3 control/ik_node.py --config bringup/<robot>/config/ik_node.yaml
+    python3 control/ik_node.py --config bringup/<robot>/config/ik_node.yaml [--robot isaacsim/configs/robot/<robot>.yaml]
 
 ee_6d.py -> /target_pose -> this node: /compute_ik (starting from the current joint angles of /joint_states, so the solution is
   the one nearest to where the arm stands; ik_seed_deg only until /joint_states has arrived; a joint that can turn a full turn
   is then set to the angle nearest to the current one, see wrap_joints_deg) -> joint goal to /move_action (plan+execute)
   -> the FollowJointTrajectory action of the robot (the controller of bringup/<robot>/config/moveit_controllers.yaml).
-bringup/<robot>/launch/<robot>.launch.py and bringup/integration/launch/robot.launch.py (robot:=<name>) start it with
-move_group (ik_node:=false leaves it out).
+bringup/integration/launch/robot.launch.py (robot:=<name>) starts it with move_group (ik_node:=false leaves it out).
 It receives the same /target_pose as control/robot_sequence.py, so run only one of the two.
 
 /target_pose: position = TCP, orientation = ee_link orientation (z axis = tool direction, so rpy 180 0 0 = tool pointing down), in
-base_frame of the yaml = `world`, the Isaac Sim world: the robot may stand anywhere in it (its pos_m / rpy_deg are in MoveIt's URDF).
+base_frame of the yaml = `world`, the Isaac Sim world: the robot may stand anywhere in it (the launch puts its pose in the map into MoveIt's URDF).
 The IK is solved for ee_link by subtracting tcp_offset (the TCP in the ee_link frame).
 
-Customizing a robot (the yaml, see bringup/ur5e/config/ik_node.yaml):
+Customizing a robot (--robot = isaacsim/configs/robot/<robot>.yaml, the launch passes it; without it the defaults of DEFAULTS):
   speed          velocity_scaling / acceleration_scaling = fraction of the limits MoveIt uses (bringup/<robot>/config/joint_limits.yaml
                  and the URDF), so the speed of one joint is set there and the speed of the whole motion here
-  joint limits   joint_limits_deg = optional narrower range per joint: an IK solution outside it is refused (MoveIt's own
-                 position limits come from the URDF / joint_limits.yaml)
+  joint limits   joint_limits_deg = optional narrower range per joint: an IK solution outside it is refused (the launch gives MoveIt
+                 the same range, so it plans inside it too)
+and in bringup/<robot>/config/ik_node.yaml:
   full turns     wrap_joints_deg = the joints whose URDF range is wider than 360 deg, with that range (made by make_robot_config.py).
                  q and q +- 360 are the same pose there and the IK may return any of them (its restarts from a random seed keep the
                  turn), so the arm would spin once round to reach the angle. Each of these joints is set to the equivalent angle
@@ -28,7 +28,9 @@ Customizing a robot (the yaml, see bringup/ur5e/config/ik_node.yaml):
 """
 import argparse
 import math
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import rclpy
@@ -46,6 +48,9 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profi
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'isaacsim'))
+import sim_config  # noqa: E402  the robot yamls (speed, joint limits)
 
 REQUIRED_KEYS = ('base_frame', 'group_name', 'ee_link', 'arm_joints', 'ik_seed_deg')
 DEFAULTS = {
@@ -69,12 +74,15 @@ MOVEIT_ACTIONS = ('/move_action', '/execute_trajectory')
 ACTIVE_STATUS  = (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING, GoalStatus.STATUS_CANCELING)
 
 
-def load_config(path):
+def load_config(path, robot_yaml=None):
+    """ik_node.yaml of the robot + the speed and the joint limits of its robot yaml (velocity_scaling, acceleration_scaling, joint_limits_deg)"""
     cfg = yaml.safe_load(open(path)) or {}
     missing = [k for k in REQUIRED_KEYS if k not in cfg]
     if missing:
         raise ValueError(f'{path}: missing {missing}')
     cfg = {**DEFAULTS, **cfg}
+    if robot_yaml:
+        cfg.update(sim_config.robot_motion(yaml.safe_load(open(robot_yaml)) or {}))
     n = len(cfg['arm_joints'])
     if len(cfg['ik_seed_deg']) != n:
         raise ValueError(f'{path}: ik_seed_deg needs one value per arm_joints entry ({n})')
@@ -319,9 +327,10 @@ class IKNode(Node):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--config', required=True, help='robot yaml, e.g. bringup/ur5e/config/ik_node.yaml')
+    parser.add_argument('--config', required=True, help='ik_node yaml of the robot, e.g. bringup/ur5e/config/ik_node.yaml')
+    parser.add_argument('--robot', help='robot yaml, e.g. isaacsim/configs/robot/ur5e.yaml: its velocity_scaling, acceleration_scaling, joint_limits_deg')
     cli, ros_args = parser.parse_known_args(args)
-    cfg = load_config(cli.config)
+    cfg = load_config(cli.config, cli.robot)
 
     rclpy.init(args=ros_args)
     node = IKNode(cfg)

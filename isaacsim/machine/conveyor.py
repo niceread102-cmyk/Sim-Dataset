@@ -1,6 +1,7 @@
 """Step of the conveyor of the map (robot_sim.py machines: conveyor, its chain of attachments over ROS 2).
 
-    python3 isaacsim/machine/conveyor.py [--now [N]]      (ros2 launch robot.launch.py ... sequence:=<name> starts it with the sequence)
+    python3 isaacsim/machine/conveyor.py [--now [N]]      (ros2 launch robot.launch.py map:=<map> sequence:=<name> starts it in a map with the conveyor)
+Its topics and time limits are trigger_topic, carriers.topic and cycle: of configs/machine/conveyor.yaml.
 
 The two pairs of left hands of the laser marker put a plate each on the attachments of the conveyor (one in each of its two rows). When the left rotor is back at rest,
 laser_marker.py publishes /laser_marker/hands_done (std_msgs/Empty): the chain then moves one pitch (0.1 m), so that the next pair of attachments is under the hands
@@ -15,6 +16,7 @@ Only one of these nodes may run per ROS domain (two would move the chain twice).
 import argparse
 import fcntl
 import os
+import sys
 import threading
 import time
 
@@ -24,9 +26,16 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Empty, Int32
 
-TOPIC_TRIGGER = '/laser_marker/hands_done'                             # std_msgs/Empty from laser_marker.py: the left hands have let go of their plates
-TOPIC_CARRIERS = '/conveyor/carriers'
-TIMEOUT = {'machine': 60.0, 'start': 10.0, 'step': 60.0}               # s (wall clock: the simulation may run slower than real time)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import sim_config  # noqa: E402  configs/machine/conveyor.yaml
+
+CFG = sim_config.load_machine('conveyor')                              # configs/machine/conveyor.yaml (carriers.topic: the one robot_sim.py moves the chain on)
+try:
+    TOPIC_TRIGGER = str(CFG['trigger_topic'])                          # std_msgs/Empty from laser_marker.py: the left hands have let go of their plates
+    TOPIC_CARRIERS = str(CFG['carriers']['topic'])
+    TIMEOUT = {k: float(v) for k, v in CFG['cycle']['timeouts_s'].items()}   # s: machine, start, step (wall clock: the simulation may run slower than real time)
+except (KeyError, TypeError) as e:
+    raise SystemExit(f"{sim_config.machine_file('conveyor')}: missing {e} (trigger_topic, carriers.topic, cycle.timeouts_s)") from None
 
 
 class Conveyor(Node):

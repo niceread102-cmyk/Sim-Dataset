@@ -1,9 +1,9 @@
 # Parameters of robot_sequence.py (pick & place sequence), the same for every robot. Edit them and restart the node to apply.
 # What belongs to the robot is not here: planning group, arm joints, base / end frame and TCP length are read from
-# bringup/<robot>/config/ik_node.yaml, the start pose (the IK seed and home), the gripper (topic, joint, positions) from configs/robots/<robot>.yaml and the gripper URDF
+# bringup/<robot>/config/ik_node.yaml, the start pose (the IK seed and home), the gripper (topic, joint, positions) from configs/robot/<robot>.yaml and the gripper URDF
 # (no gripper: no gripper steps). configs/sequence/<robot>.yaml (optional) overrides any key below for one robot.
 #
-# Pose lists are TCP (gripper tip) targets in the world frame (ik_node.yaml base_frame: the Isaac Sim world, robots stand at pos_m / rpy_deg of their yaml): [x, y, z (m), roll, pitch, yaw (deg)] — the same values and
+# Pose lists are TCP (gripper tip) targets in the world frame (ik_node.yaml base_frame: the Isaac Sim world, the robot stands at scene.robot_pose of the map): [x, y, z (m), roll, pitch, yaw (deg)] — the same values and
 # the same intrinsic XYZ convention as the input of ee_6d.py. rpy 180 0 0 = tool pointing down (at the floor).
 #
 # Sequence on every /target_pose:
@@ -12,14 +12,14 @@
 # Every step starts when the one before it has finished (result of the trajectory action, answer of robot_sim.py to a gripper command): no delays.
 # insert / rise (and lower / lift) are straight lines of the tool (see line), the other moves are joint goals.
 # At start (once move_group is up) the node first closes the gripper and moves to the home pose.
-# The sequence belongs to the robot alone: nothing of the scene (map, pallets, boxes, basket) is read here.
+# The sequence belongs to the robot alone: of the map (map:=) only its robot is read (scene.robot, when --robot is not given).
 
 target: tcp                           # what /target_pose is: tcp = the pose of the TCP | object = the pose of the part (the sequence works out the TCP pose
                                       #    that grips it and whether the part is standard or turned over, for poses.place)
 
 poses:                                # TCP [x, y, z (m), roll, pitch, yaw (deg)] in the world frame, or a keyword
   home: ready                         # initialization pose = home pose (at start, after opening the gripper, end of the sequence):
-                                      #    ready = the TCP of the start pose of the robot (joint_pos of configs/robots/<robot>.yaml; the
+                                      #    ready = the TCP of the start pose of the robot (joint_pos of configs/robot/<robot>.yaml; the
                                       #    ik_seed_deg of its ik_node.yaml if the yaml has none), or [x, y, z, roll, pitch, yaw]
   place: home                         # where the part is let go of: home = the home pose (no extra moves), [x, y, z, roll, pitch, yaw], or one
                                       #    pose per state of the part: {standard: [...], turn_over: [...]} (see configs/sequence/side_plate.yaml)
@@ -67,7 +67,7 @@ tolerance:
                               #    toward the robot base by up to this distance (1/4, 1/2, then the full distance).
                               #    for poses on the edge of the workspace, e.g. TCP (1, 1, 1) is about 3 mm out of reach
 
-motion:                       # the speed of the arm (velocity_scaling, acceleration_scaling) is not here: it is speeds.<robot> of the sequence yaml (side_plate.yaml)
+motion:                       # the speed of the arm (velocity_scaling, acceleration_scaling) is not here: it is the robot's (configs/robot/<robot>.yaml)
   planning_time: 5.0          # s
   planning_attempts: 1
   retries: 2                  # a move that fails (e.g. TIMED_OUT, CONTROL_FAILED) is tried again, from wherever the arm

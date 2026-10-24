@@ -1,0 +1,19 @@
+# lab robot_sim.py robot:=lite6    (URDF: ../../../assets/robot/lite6/urdf/lite6.urdf, MoveIt: ros2 launch robot.launch.py robot:=lite6)
+# Only the robot is here, the same in every map: what stands around it is the map (configs/map/<map>.yaml, map:=<map>).
+name: lite6
+gripper: none                     # no separate gripper URDF: the lite6 gripper is part of lite6.urdf (see gripper_joints)
+gripper_joints: [finger_joint1]   # joints of lite6.urdf that <gripper_topic> drives (0 = lower limit = closed, 1 = upper = open); finger_joint2 mimics it
+gripper_topic: /gripper/command   # std_msgs/Float64
+gripper_material: null
+pos_m: [0.0, 0.0, 0.0]            # mount of the robot base (m) = 0 for every robot: where it stands in a map is scene.robot_pose of the map
+rpy_deg: [0, 0, 0]
+joint_pos: {joint3: 1.5708, joint5: 1.5708}
+                                  # start pose (rad): the `init` pose of the lite6 setup [0, 0, pi/2, 0, pi/2, 0] (= ik_seed_deg of bringup/lite6)
+stiffness: 1600                   # joint drives, N*m/deg (prismatic: N/m): the lite6 script's value (m20: 20000). Higher = less sag
+damping: 80                       # higher = less swinging, slower settling (m20: 1000)
+speed: 0.3                        # max joint speed = speed x URDF velocity limit
+velocity_scaling: 0.15            # MoveIt (ik_node.py, robot_sequence.py): share of the joint velocity limits the motions use (1.0 = full)
+acceleration_scaling: 0.05        # MoveIt: share of the acceleration limits (bringup/<robot>/config/joint_limits.yaml)
+joint_limits_deg: {}              # narrower position range per joint than the URDF (deg), e.g. {J1: [-90, 90]}: MoveIt plans and solves the IK inside it (the start pose has to be inside too)
+physics_hz: 60                    # physics steps per simulated second (Isaac Sim default 60)
+controller: /lite6_traj_controller # <controller>/joint_trajectory, <controller>/follow_joint_trajectory (bringup/lite6/config/moveit_controllers.yaml)

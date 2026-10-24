@@ -1,0 +1,21 @@
+# The citrus crates for the R-2000iC/125L: 3 x 3 crates (550 x 360 x 300 mm), 6 layers, on the floor in front of the robot, to measure the distances / reach.
+#   lab robot_sim.py map:=Orange          ros2 launch robot.launch.py map:=Orange
+# A map of its own: everything of the scene is in this file. World = the Isaac Sim world (m); the robot base at the origin.
+
+scene:
+  robot: r2000ic_125l              # the robot of this map (robot:=<name> on the command line wins); it stands at the origin, on the floor (no robot_pose)
+  pallets:
+    seed: 0
+    items:                         # pos_m = centre of the block of crates at the height of its bottom (the floor)
+      - {pos_m: [2.0, 0.0, 0.0], yaw_deg: 90}  # turned by 90 deg: the block is 1.28 m along x and 1.99 m along y (crates 10 cm apart), the long side of the crates along y. x = the distance of the block centre from the robot axis: the nearest crate edge is 1.36 m, the farthest 2.64 m away (move it to measure other distances)
+    crate:
+      usd: ../../../assets/object/usd/citrus_crate_550x360x300.usd   # relative to this file: body 550 x 360 x 300 mm, long side along x, the bottom at z 0; the handles stand out 23 mm at each short end
+      size_m: [0.598, 0.360, 0.300]  # outer x y z with the handles (the body alone is 0.550): the crates of a row touch at the handles
+      inner_size_m: [0.500, 0.310]   # (estimate) usable floor x y: no parts in the crates, not used
+      floor_z_m: 0.02                # (estimate) top of the crate floor (check_reach.py measures down to it)
+      collision: "off"               # no collider at all: the crates are only to look at, the arm passes through them (only the reach is measured)
+      gap_m: 0.10                    # between the crates of a layer (x and y): 10 cm
+    parts_per_crate: 0             # empty crates (no `part:` needed)
+    layers: 6                      # six layers of 3 x 3 = 54 crates, 6 x 0.3005 = 1.80 m high
+    grids: [[3, 3]]                # crates per layer along the x y of the block
+    dynamic_layers: 1
