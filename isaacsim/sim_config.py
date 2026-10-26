@@ -47,6 +47,15 @@ def option(argv, key):
     return found
 
 
+def _match(name, names):
+    """`name` as it is spelled in names, whatever its case (an exact spelling wins); `name` itself when no single name matches"""
+    name = str(name)
+    if name in names:
+        return name
+    same = sorted({n for n in names if n.lower() == name.lower()})
+    return same[0] if len(same) == 1 else name
+
+
 # ---------------------------------------------------------------- maps
 
 def map_names():
@@ -65,7 +74,7 @@ def map_path(name):
     name = os.path.expanduser(str(name).strip())
     if name.endswith((".yaml", ".yml")) and os.path.isfile(name):
         return os.path.abspath(name)
-    stem = name[:-5] if name.endswith(".yaml") else name
+    stem = _match(name[:-5] if name.endswith(".yaml") else name, map_names() + [DATASET_CONFIG])   # map:=side_plate_map = SIDE_PLATE_MAP
     if stem == DATASET_CONFIG:
         raise ValueError(f"map:={name}: configs/map/{DATASET_CONFIG}.yaml is the config of the dataset generator, not a map; "
                          f"maps: {', '.join(map_names()) or '-'}")
@@ -96,10 +105,20 @@ def robot_names():
     return sorted(names)
 
 
+def canonical_robot(name):
+    """A robot name as its config file spells it (robot:=M20_35_18D works too); the name itself when it is a path or no single name matches"""
+    name = str(name)
+    if os.path.sep in name or name.endswith((".yaml", ".yml")):
+        return name
+    stems = [f[:-5] for f in os.listdir(ROBOTS_DIR) if f.endswith(".yaml")]
+    return _match(name, stems + robot_names())
+
+
 def robot_config_path(choice):
-    """The yaml of a robot: the path of a yaml, configs/robot/<choice>.yaml, or the file of that folder whose `name:` is choice"""
+    """The yaml of a robot: the path of a yaml, configs/robot/<choice>.yaml, or the file of that folder whose `name:` is choice (the case of the name does not matter)"""
     if os.path.isfile(choice):
         return os.path.abspath(choice)
+    choice = canonical_robot(choice)
     own = os.path.join(ROBOTS_DIR, f"{choice}.yaml")
     if os.path.isfile(own):
         return own
@@ -114,7 +133,7 @@ def pick_robot(robot=None, scene=None):
     name = robot or (scene or {}).get("robot")
     if not name:
         raise ValueError(f"no robot: pass robot:=<name> (or a map:= whose scene.robot names one), or start robot_sim.py first; robots: {', '.join(robot_names())}")
-    return str(name)
+    return canonical_robot(name)
 
 
 # ---------------------------------------------------------------- the robot and the map robot_sim.py runs
@@ -143,17 +162,18 @@ def scene_robots(scene, robot=None):
     robot:= alone = that robot at scene.robot_pose; else scene.robots: [{name, di, pose}, ...]; else scene.robot at scene.robot_pose"""
     zero = [0, 0, 0, 0, 0, 0]
     if robot:
-        return [{"name": str(robot), "di": None, "pose": scene.get("robot_pose") or zero}]
+        return [{"name": canonical_robot(robot), "di": None, "pose": scene.get("robot_pose") or zero}]
     if scene.get("robots"):
-        return [{"name": str(r["name"]), "di": r.get("di"), "pose": r.get("pose") or zero} for r in scene["robots"]]
+        return [{"name": canonical_robot(r["name"]), "di": r.get("di"), "pose": r.get("pose") or zero} for r in scene["robots"]]
     if scene.get("robot"):
-        return [{"name": str(scene["robot"]), "di": None, "pose": scene.get("robot_pose") or zero}]
+        return [{"name": canonical_robot(scene["robot"]), "di": None, "pose": scene.get("robot_pose") or zero}]
     raise ValueError(f"no robot: pass robot:=<name> (or a map:= with scene.robots / scene.robot), or start robot_sim.py first; robots: {', '.join(robot_names())}")
 
 
 def robot_entry(scene, robot=None, di=None):
     """The one robot of the map a tool (the launch, ee_6d) is for: the one with ROS domain di (di:=), else the one named robot:=, else the first"""
     rows = scene_robots(scene) if (scene.get("robots") or scene.get("robot")) else []
+    robot = canonical_robot(robot) if robot else robot
     if di not in (None, ""):
         hit = [r for r in rows if r["di"] is not None and int(r["di"]) == int(di)]
         if hit:

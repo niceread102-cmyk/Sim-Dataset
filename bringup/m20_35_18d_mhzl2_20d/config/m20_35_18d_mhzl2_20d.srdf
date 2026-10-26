@@ -19,6 +19,10 @@
   <disable_collisions link1="J3_link" link2="J4_link" reason="Adjacent" />
   <disable_collisions link1="J4_link" link2="J5_link" reason="Adjacent" />
   <disable_collisions link1="J4_link" link2="J6_link" reason="Always" />
+  <!-- The collision mesh of J4_link (FANUC j4.stl) is up to 3 cm fatter than the link: it always touches J6_link (the Always pair above); the extension and the PhoXi on J6 touch it
+       only with the wrist folded past ~104 deg (make_robot_config.py only turns off pairs that collide in 90 % of random poses). The visible links stay >= 7 mm apart there. -->
+  <disable_collisions link1="J4_link" link2="m20_extension_link" reason="User" />
+  <disable_collisions link1="J4_link" link2="phoxi_scanner" reason="User" />
   <disable_collisions link1="J5_link" link2="J6_link" reason="Adjacent" />
   <disable_collisions link1="J6_link" link2="flange" reason="Adjacent" />
   <disable_collisions link1="J6_link" link2="m20_extension_link" reason="Adjacent" />

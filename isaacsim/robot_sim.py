@@ -97,7 +97,7 @@ for _a in args.options:
     if _a.startswith("map:="):
         args.map = _a[len("map:="):]
     elif _a.startswith("obj:="):
-        args.objects.append(_a[len("obj:="):])              # an object on the command line, on top of the objects of the map
+        args.objects.append(_a[len("obj:="):])               # an object on the command line, on top of the objects of the map
     elif _a.startswith("robot:="):
         args.config = _a[len("robot:="):] or None
     elif _a not in ("robot", "map"):

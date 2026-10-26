@@ -34,7 +34,7 @@ scene:                        # robot_sim.py: what stands around the robot; the 
     sdf_resolution: 256       # SDF cells along the longest side of the part (55.6 mm: ~0.2 mm)
     layer_gap_m: -0.010       # the crates of a stack nest like real ones: the 10 mm high foot of a crate (473 x 313 mm, the crate is 520 x 365) goes into the rim of the one below,
                               #   its wide part sits on that rim: a layer = 0.190 m (0 = they only touch and the foot shows as a dark gap; the default is +0.5 mm)
-    parallel: true            # every part lies level: upright (hub up) or flipped (hub down) at random, tilt_deg below is not used (false = tilt_deg)
+    parallel: false           # every part lies level: upright (hub up) or flipped (hub down) at random, tilt_deg below is not used (false = tilt_deg)
     tilt_deg:                 # random tilt of every part from lying flat (about a horizontal axis, random direction); the physics settles them from there
       upright: [0, 6]         #   hub up (lies on its flange)
       flipped: [8, 35]        #   hub down (stands on its hub: leaning)
@@ -46,29 +46,29 @@ scene:                        # robot_sim.py: what stands around the robot; the 
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 2
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 3
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 4
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 5 (top)
+      #   - [[10, 10], [10, 10], [10, 150]]    # layer 5 (top)
       # - # pallet 1
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 1
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 2
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 3
       #   - [[10, 10], [10, 10], [10, 10]]    # layer 4
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 5 (top)
+      #   - [[10, 10], [10, 10], [10, 150]]    # layer 5 (top)
 
       - # pallet 0
-        - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
-        - [[10, 10], [10, 10], [10, 10]]    # layer 1
-        - [[10, 10], [10, 10], [10, 10]]    # layer 2
-        - [[10, 10], [10, 10], [10, 10]]    # layer 3
-        - [[10, 10], [10, 10], [10, 10]]    # layer 4
-        - [[10, 10], [10, 10], [10, 10]]    # layer 5 (top)
-      - # pallet 10
-        - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
-        - [[10, 10], [10, 10], [10, 10]]    # layer 1
-        - [[10, 10], [10, 10], [10, 10]]    # layer 2
-        - [[10, 10], [10, 10], [10, 10]]    # layer 3
-        - [[10, 10], [10, 10], [10, 10]]    # layer 4
-        - [[10, 10], [10, 10], [10, 10]]    # layer 5 (top)
+        - [[1, 1], [1, 1], [1, 1]]    # layer 0 (bottom)
+        - [[1, 1], [1, 1], [1, 1]]    # layer 1
+        - [[1, 1], [1, 1], [1, 1]]    # layer 2
+        - [[1, 1], [1, 1], [1, 1]]    # layer 3
+        - [[1, 1], [1, 1], [1, 1]]    # layer 4
+        - [[1, 1], [1, 1], [1, 1]]    # layer 5 (top)
+      - # pallet 1
+        - [[1, 1], [1, 1], [1, 1]]    # layer 0 (bottom)
+        - [[1, 1], [1, 1], [1, 1]]    # layer 1
+        - [[1, 1], [1, 1], [1, 1]]    # layer 2
+        - [[1, 1], [1, 1], [1, 1]]    # layer 3
+        - [[1, 1], [1, 1], [1, 1]]    # layer 4
+        - [[1, 1], [1, 1], [1, 1]]    # layer 5 (top)
 
     switch_topic: /crate_active   # std_msgs/String json {"centre": [x, y]} (vision_pick.py): the crate of a `switch: true` layer that has physics now (one at a time)
     physics:                  # the physics of the crates and parts per pallet and layer (0 = bottom; read at start: restart robot_sim.py after a change). The crates are always there and stacked (visible);

@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 assets_cache/
 isaacsim/run_isaacsim.py
+*.stl
