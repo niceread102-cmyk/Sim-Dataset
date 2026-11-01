@@ -1,20 +1,8 @@
-"""Step of the conveyor of the map (robot_sim.py machines: conveyor, its chain of attachments over ROS 2).
+"""conveyor.py: steps the conveyor chain of the map, one pitch per trigger_topic (the conveyor: /laser_marker/hands_done; robot_sim.py moves it on carriers.topic).
 
-    python3 isaacsim/machine/conveyor.py [--now [N]]      (ros2 launch robot.launch.py map:=<map> sequence:=<name> starts it in a map with the conveyor)
-Its topics and time limits are trigger_topic, carriers.topic and cycle: of configs/machine/conveyor.yaml.
-
-The two pairs of left hands of the laser marker put a plate each on the attachments of the conveyor (one in each of its two rows). When the left rotor is back at rest,
-laser_marker.py publishes /laser_marker/hands_done (std_msgs/Empty): the chain then moves one pitch (0.1 m), so that the next pair of attachments is under the hands
-for the next two plates. The chain is a loop: what leaves at the -x end of the straight run comes back at the +x end.
-
-  /conveyor/carriers          std_msgs/Int32   n > 0 = advance n pitches, 0 = stop (robot_sim.py)
-  /conveyor/carriers/moving   std_msgs/Bool    True while the chain moves (latched)
-
-Every /laser_marker/hands_done is one step; one that comes while the chain still moves waits for its turn. --now moves the chain N pitches (default 1) right away and ends.
-Only one of these nodes may run per ROS domain (two would move the chain twice).
+    python3 isaacsim/machine/conveyor.py [--machine <name>] [--now [N]]        (robot.launch.py with a sequence starts the one of the machine named conveyor; settings: configs/machine/<name>.yaml)
 """
 import argparse
-import fcntl
 import os
 import sys
 import threading
@@ -27,22 +15,23 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Empty, Int32
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import sim_config  # noqa: E402  configs/machine/conveyor.yaml
+import sim_config
 
-CFG = sim_config.load_machine('conveyor')                              # configs/machine/conveyor.yaml (carriers.topic: the one robot_sim.py moves the chain on)
+NAME = next((sys.argv[i + 1] for i, a in enumerate(sys.argv[:-1]) if a == '--machine'), 'conveyor')
+CFG = sim_config.load_machine(NAME)
 try:
-    TOPIC_TRIGGER = str(CFG['trigger_topic'])                          # std_msgs/Empty from laser_marker.py: the left hands have let go of their plates
+    TOPIC_TRIGGER = str(CFG['trigger_topic'])
     TOPIC_CARRIERS = str(CFG['carriers']['topic'])
-    TIMEOUT = {k: float(v) for k, v in CFG['cycle']['timeouts_s'].items()}   # s: machine, start, step (wall clock: the simulation may run slower than real time)
+    TIMEOUT = {k: float(v) for k, v in CFG['cycle']['timeouts_s'].items()}
 except (KeyError, TypeError) as e:
-    raise SystemExit(f"{sim_config.machine_file('conveyor')}: missing {e} (trigger_topic, carriers.topic, cycle.timeouts_s)") from None
+    raise SystemExit(f"{sim_config.machine_file(NAME)}: missing {e} (trigger_topic, carriers.topic, cycle.timeouts_s)") from None
 
 
 class Conveyor(Node):
     def __init__(self):
-        super().__init__('conveyor_step')
-        self.moving = None                                              # chain moving (None until the first message)
-        self.pending = 0                                                # steps still to do (one per /laser_marker/hands_done)
+        super().__init__(f'{NAME}_step')
+        self.moving = None
+        self.pending = 0
         self.lock = threading.Lock()
         self.worker = None
         self.create_subscription(Bool, f'{TOPIC_CARRIERS}/moving', self.cb_moving,
@@ -54,11 +43,10 @@ class Conveyor(Node):
         self.moving = bool(msg.data)
 
     def cb_trigger(self, _):
-        self.get_logger().info('the left hands have let go: the conveyor moves one step')
+        self.get_logger().info(f'{TOPIC_TRIGGER}: {NAME} moves one step')
         self.request(1)
 
     def request(self, n):
-        """n more steps; one worker thread does them one after the other"""
         with self.lock:
             self.pending += n
             if self.worker is None or not self.worker.is_alive():
@@ -69,12 +57,11 @@ class Conveyor(Node):
         end = time.time() + TIMEOUT['machine']
         while self.pub.get_subscription_count() == 0 or self.moving is None:
             if time.time() > end:
-                raise TimeoutError(f'nobody listens on {TOPIC_CARRIERS}: is robot_sim.py running with the conveyor?')
+                raise TimeoutError(f'nobody listens on {TOPIC_CARRIERS}: is robot_sim.py running with the machine {NAME}?')
             time.sleep(0.1)
 
     def step(self):
-        """one pitch: send it, wait until the chain moves and until it has stopped again"""
-        self.pub.publish(Int32(data=1))                                 # once: every message adds a pitch
+        self.pub.publish(Int32(data=1))
         end = time.time() + TIMEOUT['start']
         while self.moving is not True:
             if time.time() > end:
@@ -103,21 +90,12 @@ class Conveyor(Node):
             log.error(f'conveyor stopped: {e}')
 
 
-def single_instance():
-    """only one per ROS domain: the lock goes with the process"""
-    lock = open(f'/tmp/conveyor_step_{os.environ.get("ROS_DOMAIN_ID", "0")}.lock', 'w')
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        raise SystemExit('conveyor.py is already running (started by the launch, or by hand before): a second one would move the chain twice for every step')
-    return lock
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--machine', default='conveyor', help='name of the machine (configs/machine/<name>.yaml) whose chain is stepped (default conveyor)')
     ap.add_argument('--now', nargs='?', const=1, type=int, metavar='N', help='move the chain N pitches (default 1) right away, without waiting for the hands, and end')
     args, ros_args = ap.parse_known_args()
-    lock = None if args.now else single_instance()                      # (keeps the file open for the life of the process)
+    lock = None if args.now else sim_config.single_instance(f'{NAME}_step', f'conveyor.py --machine {NAME} is already running (started by the launch, or by hand before): a second one would move the chain twice for every step')
     rclpy.init(args=ros_args)
     node = Conveyor()
     executor = SingleThreadedExecutor()
@@ -129,7 +107,7 @@ def main():
             while node.worker is not None and node.worker.is_alive():
                 executor.spin_once(timeout_sec=0.05)
         else:
-            node.get_logger().info(f'waiting for {TOPIC_TRIGGER} (the left hands of the laser marker have let go of their plates): one step of the chain each')
+            node.get_logger().info(f'waiting for {TOPIC_TRIGGER}: one step of the chain of {NAME} each')
             executor.spin()
     except KeyboardInterrupt:
         pass

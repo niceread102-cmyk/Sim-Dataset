@@ -1,38 +1,35 @@
-# The conveyor (assets/machine/conveyopr): a chain of jig pairs with a drive sprocket. Everything about the machine itself, the same in every map;
-# a map puts it somewhere (scene.machines: name, pos_m, rpy_deg, replaces: see laser_marker.yaml). robot_sim.py reads this file at start (restart it
-# after a change; only `fixtures:` is read again while it runs), isaacsim/machine/conveyor.py reads `trigger_topic` and `cycle:`.
-urdf: conveyopr/urdf/conveyor.urdf   # below assets/machine/ (the folders are spelled like this on disk: conveyopr, mashes)
+# The conveyor (assets/machine/conveyopr): URDF, drives, chain of jigs, attach and the step cycle of isaacsim/machine/conveyor.py; the same in every map (a map places it in scene.machines).
+urdf: conveyopr/urdf/conveyor.urdf
 
-materials:                    # real metal, see the laser marker
-  - {links: ["base_link"], color: [0.62, 0.64, 0.67], metallic: 1.0, roughness: 0.40}              # frame and rails: brushed steel
-  - {links: ["jig_pair_.*"], color: [0.50, 0.52, 0.55], metallic: 1.0, roughness: 0.28}            # the attachments: steel
-  - {links: ["drive_sprocket_link"], color: [0.30, 0.31, 0.34], metallic: 1.0, roughness: 0.30}    # sprocket: dark steel
-collision: false              # no collider on any link of the conveyor (frame, rails, jigs, sprocket): only to look at, the plates put on it are removed (attach:); its chain still moves
-collision_decomposition: {}   # (the jigs had their exact shape as an SDF: {"jig_pair_.*": {sdf: 512}}; now they have no collider, see attach.jig_collision)
-collision_friction: {}        # (the jigs were oiled: {"jig_pair_.*": 0.15})
-fixtures:                     # the friction of those jigs, read again WHILE robot_sim.py RUNS (save the file: no restart)
-  friction: 0.08              #   at rest
-  friction_moving: 0.5        #   while the chain moves
+materials:
+  - {links: ["base_link"], color: [0.62, 0.64, 0.67], metallic: 1.0, roughness: 0.40}
+  - {links: ["jig_pair_.*"], color: [0.50, 0.52, 0.55], metallic: 1.0, roughness: 0.28}
+  - {links: ["drive_sprocket_link"], color: [0.30, 0.31, 0.34], metallic: 1.0, roughness: 0.30}
+collision: false
+collision_decomposition: {}
+collision_friction: {}
+fixtures:
+  friction: 0.08
+  friction_moving: 0.5
 
-carriers:                     # the 13 pairs of attachments of the chain move in steps along x of the URDF (one pitch = 0.1 m) and run round: leaving at -x, back at +x
+carriers:
   joints: [jig_pair_0_joint, jig_pair_1_joint, jig_pair_2_joint, jig_pair_3_joint, jig_pair_4_joint, jig_pair_5_joint, jig_pair_6_joint, jig_pair_7_joint, jig_pair_8_joint, jig_pair_9_joint, jig_pair_10_joint, jig_pair_11_joint, jig_pair_12_joint]
-  slots_m: [-0.592, -0.492, -0.392, -0.292, -0.192, -0.092, 0.008, 0.108, 0.208, 0.308, 0.408, 0.508, 0.608]   # x of each pair at rest; the last one (0.608) is under the left hands of the laser marker
-  window_m: [-0.642, 0.658]                    # the loop: 13 x 0.1 = 1.3 m
-  axis: [1, 0, 0]                              # the direction the carriers move along, in the frame of base_link
-  speed_mps: 0.2                               # m/s while the chain moves; one pitch = 0.1 m
-  accel_mps2: 0.5                              # how softly the chain starts and stops (m/s^2)
-  topic: /conveyor/carriers                    # std_msgs/Int32: n > 0 = advance n pitches, 0 = stop. <topic>/moving (std_msgs/Bool, latched): True while it moves
+  slots_m: [-0.592, -0.492, -0.392, -0.292, -0.192, -0.092, 0.008, 0.108, 0.208, 0.308, 0.408, 0.508, 0.608]
+  window_m: [-0.642, 0.658]
+  axis: [1, 0, 0]
+  speed_mps: 0.2
+  accel_mps2: 0.5
+  topic: /conveyor/carriers
 
-trigger_topic: /laser_marker/hands_done   # std_msgs/Empty: the left hands of the laser marker have put a plate on each jig of a pair: conveyor.py moves the chain one
-                                          # pitch (the next pair comes under the hands) and robot_sim.py makes the plates one piece with the jigs (attach:)
-attach:                       # robot_sim.py: a plate that the hands put on a jig is removed from the simulation (it costs nothing after the laser marker)
-  enabled: true               #   false = it stays a free body
-  trigger_topic: /laser_marker/hands_release   # the hands are at the jigs and about to open (they open 0.3 s later) ...
-  delay_s: 0.3                #   ... and this many simulated seconds after it (the jaws start to open) every plate on the conveyor is removed from the simulation (hidden, no collider, parked below the floor)
-  jig_links: ["jig_pair_.*"]  #   the links of the jigs
-  jig_collision: false        #   false = the jigs have no collider (only to look at); true = their colliders stay
-  remove_box_m: [[-0.70, 0.72], [-0.30, 0.23], [0.80, 1.20]]   # every plate inside this box (x, y, z ranges in the frame of base_link: the jigs of the chain and above them) is removed then
+trigger_topic: /laser_marker/hands_done
+attach:
+  enabled: true
+  trigger_topic: /laser_marker/hands_release
+  delay_s: 0.3
+  jig_links: ["jig_pair_.*"]
+  jig_collision: false
+  remove_box_m: [[-0.70, 0.72], [-0.30, 0.23], [0.80, 1.20]]
   base_link: base_link
 
-cycle:                        # isaacsim/machine/conveyor.py
-  timeouts_s: {machine: 60.0, start: 10.0, step: 60.0}   # wall clock: the simulation may run slower than real time
+cycle:
+  timeouts_s: {machine: 60.0, start: 10.0, step: 60.0}

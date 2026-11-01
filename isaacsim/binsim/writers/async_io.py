@@ -1,5 +1,4 @@
-"""Background post-processing so the GPU keeps simulating while PNGs/JSON are written.
-numpy/PIL/zlib release the GIL for the heavy parts, so a thread pool is enough."""
+"""Thread pool for the post-processing, so the GPU keeps simulating while PNG / JSON files are written."""
 from __future__ import annotations
 
 import threading
@@ -10,7 +9,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 class AsyncWriter:
     def __init__(self, threads: int = 8, max_pending: int | None = None):
         self.pool = ThreadPoolExecutor(max_workers=max(threads, 1), thread_name_prefix="binsim-io")
-        # bound memory: block the producer when too many scenes are in flight
         self.sem = threading.BoundedSemaphore(max_pending or threads * 2)
         self.errors: list[str] = []
         self.done = 0

@@ -1,4 +1,4 @@
-"""Read back a binsim/BOP shard (for visualize.py, verify_poses.py and tests)."""
+"""Reads back a binsim / BOP shard (for visualize.py, verify_poses.py and tests)."""
 from __future__ import annotations
 
 import json
@@ -44,7 +44,7 @@ class BopScene:
 
     def instance_map(self, im_id):
         p = os.path.join(self.dir, "mask_visib_inst", f"{im_id:06d}.png")
-        if os.path.exists(p):  # outputs.mask_format: instance (uint16, gt index + 1)
+        if os.path.exists(p):
             if getattr(self, "_inst_cache", (None,))[0] != im_id:
                 self._inst_cache = (im_id, np.array(Image.open(p)).astype(np.int32) - 1)
             return self._inst_cache[1]
@@ -78,7 +78,6 @@ def list_scenes(shard_dir: str) -> list[int]:
 
 
 def load_models(shard_dir: str) -> dict:
-    """{obj_id: trimesh (METERS)} and models_info."""
     d = os.path.join(shard_dir, "models")
     with open(os.path.join(d, "models_info.json")) as f:
         info = json.load(f)

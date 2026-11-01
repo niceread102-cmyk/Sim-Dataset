@@ -1,15 +1,4 @@
-"""BOP-format writer (https://github.com/thodan/bop_toolkit/blob/master/docs/bop_datasets_format.md).
-
-<shard>/
-  camera.json, models/{obj_000001.ply, models_info.json}
-  train_pbr/<scene_id:06d>/
-    rgb/<im:06d>.png  depth/<im:06d>.png (uint16, * depth_scale = mm)  [depth_clean/ ...]
-    mask/<im>_<gt:06d>.png  mask_visib/<im>_<gt:06d>.png  (outputs.full_masks / outputs.mask_format: per_part)
-    mask_visib_inst/<im>.png  (outputs.mask_format: instance; uint16, pixel = gt index + 1, 0 = no part)
-    scene_camera.json  scene_gt.json  scene_gt_info.json  [scene_gt_coco.json]
-    grasps/<im>.json   poses/<im>.csv      (binsim extras)
-The scene's "world" frame is the BIN frame (bottom center of the bin, z up).
-"""
+"""BOP-format writer: camera.json, models, train_pbr/<scene>/ rgb, depth, masks, scene_gt / scene_camera / scene_gt_info."""
 from __future__ import annotations
 
 import json
@@ -65,17 +54,13 @@ def write_camera_json(root: str, intr, depth_scale: float):
     cam = {"cx": intr.cx, "cy": intr.cy, "fx": intr.fx, "fy": intr.fy,
            "width": intr.width, "height": intr.height, "depth_scale": depth_scale}
     if getattr(intr, "dist", ()):
-        cam["dist"] = list(intr.dist)  # lens distortion k1, k2, p1, p2, k3 (OpenCV): the images are NOT undistorted
+        cam["dist"] = list(intr.dist)
     _json(os.path.join(root, "camera.json"), cam)
 
 
 class SceneWriter:
     def __init__(self, root: str, scene_id: int, depth_scale: float, save_clean_depth: bool = False,
                  folders: dict | None = None, depth_range_m=(0.458, 1.118), depth_vis_style: str = "phoxi", dist=()):
-        """folders: per-image folders to write ({"rgb": bool, "depth": bool, ...}, missing = True); a folder is only
-        created when something is written into it. depth_vis_style: phoxi = 16-bit per-image min-max like the PhoXi
-        sample viewer (viz.depth_preview_phoxi) | fixed = 8-bit, one mapping over depth_range_m (viz.depth_preview).
-        dist: lens distortion of the images (k1, k2, p1, p2, k3), written as cam_dist next to cam_K."""
         self.dir = os.path.join(root, "train_pbr", f"{scene_id:06d}")
         self.dist = tuple(dist)
         self.depth_scale = depth_scale
@@ -104,19 +89,17 @@ class SceneWriter:
 
     def add_view(self, im_id: int, rgb, depth_m, K, T_cam_w_R, T_cam_w_t_mm, gts, infos, masks_full, masks_visib,
                  depth_clean_m=None, inst_visib=None):
-        """masks_full / masks_visib: per-gt (H, W) bool masks (None or None entries = not written);
-        inst_visib: (H, W) gt index per pixel (-1 = no part), written as one uint16 PNG (gt index + 1)."""
         tag = f"{im_id:06d}"
         if self.enabled("rgb"):
             save_png(os.path.join(self._sub("rgb"), f"{tag}.png"), rgb)
         d16 = self._depth_u16(depth_m)
         if self.enabled("depth"):
             save_png(os.path.join(self._sub("depth"), f"{tag}.png"), d16)
-        if self.folders.get("depth_vis", False):  # preview of exactly the stored values (off unless asked for)
+        if self.folders.get("depth_vis", False):
             d_m = d16 * self.depth_scale / 1000.0
             vis = depth_preview_phoxi(d_m) if self.depth_vis_style == "phoxi" else depth_preview(d_m, *self.depth_range_m)
             save_png(os.path.join(self._sub("depth_vis"), f"{tag}.png"), vis)
-        if self.folders.get("depth_relief", False):  # local-contrast preview: small height differences (relief of the parts) visible
+        if self.folders.get("depth_relief", False):
             save_png(os.path.join(self._sub("depth_relief"), f"{tag}.png"), depth_preview_relief(d16 * self.depth_scale / 1000.0))
         if self.save_clean_depth and depth_clean_m is not None:
             save_png(os.path.join(self._sub("depth_clean"), f"{tag}.png"), self._depth_u16(depth_clean_m))

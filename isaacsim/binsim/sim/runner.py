@@ -1,9 +1,4 @@
-"""Main generation loop (runs inside Isaac Sim, after AppLauncher has started the app).
-
-Per batch (all envs in lock-step):
-  reset/placement -> randomize visuals -> drop + shake + settle (physics only, no rendering)
-  -> remove escaped parts -> V camera views (render only) -> hand off to writer threads.
-"""
+"""Main generation loop inside Isaac Sim: placement -> randomize -> drop and settle -> camera views -> writer threads."""
 from __future__ import annotations
 
 import json
@@ -52,19 +47,17 @@ class Generator:
         os.makedirs(os.path.join(self.out, "viz"), exist_ok=True)
         self.rng = np.random.default_rng([int(cfg.sim.get("seed", 0)), self.shard])
 
-        # ---- assets & geometry (pure python; USD authored with pxr) ----
         t0 = time.monotonic()
         self.part_assets, self.bin_asset = prepare_all(cfg)
         print(f"[INFO] assets ready in {time.monotonic() - t0:.1f}s: "
               f"{[a.usd_path for a in self.part_assets]} bin={self.bin_asset.usd_path}", flush=True)
         self.geoms = part_geoms_from_cfg(cfg.parts, [a.extents for a in self.part_assets], [a.radius for a in self.part_assets],
-                                         [a.mesh for a in self.part_assets])  # mesh: loading.mode stack
+                                         [a.mesh for a in self.part_assets])
         self.bin_geom = bin_geom_from_cfg(cfg.bin)
         self.rim_z = rim_height(cfg.bin, self.bin_geom)
         self.layout = pool_layout(cfg.parts, [a.radius for a in self.part_assets])
         self.intr = intrinsics_from_cfg(cfg.camera)
 
-        # ---- simulation ----
         self.device = cfg.sim.get("device", "cuda:0")
         C.detect_quat_order(cfg.sim.get("quat_order", "auto"))
         C.disable_isaacsim_physics_warm_start()
@@ -92,7 +85,6 @@ class Generator:
         self._hold_robot()
         self._check_intrinsics()
 
-        # ---- grasp libraries & collision points ----
         grng = np.random.default_rng(0)
         self.libraries = [G.build_library(p, a.mesh, cfg.gripper, grng) for p, a in zip(cfg.parts, self.part_assets)]
         npts = int(cfg.get("grasps", {}).get("point_samples", 1500))
@@ -106,7 +98,6 @@ class Generator:
         self.writer = AsyncWriter(int(run.get("writer_threads", 8)))
         self.first_view = True
 
-    # ------------------------------------------------------------------ setup helpers
     def _entity(self, name):
         try:
             return self.scene[name]
@@ -146,7 +137,6 @@ class Generator:
         with open(os.path.join(self.out, "run_info.json"), "w") as f:
             json.dump(info, f, indent=2)
 
-    # ------------------------------------------------------------------ physics helpers
     def _step(self, render=False, n=1):
         for _ in range(n):
             self.scene.write_data_to_sim()
@@ -154,7 +144,6 @@ class Generator:
             self.scene.update(self.dt)
 
     def _write_slots(self, pos, quat, env_ids=None, slots=None):
-        """pos (S,N,3) world, quat (S,N,4) wxyz; writes zero velocity too."""
         slots = range(len(self.slots)) if slots is None else slots
         for s in slots:
             p, q = pos[s], quat[s]
@@ -167,17 +156,16 @@ class Generator:
 
     def _read_slots(self):
         pos, quat = zip(*(C.read_pose(o) for o in self.slots))
-        return np.stack(pos), np.stack(quat)   # (S,N,3), (S,N,4)
+        return np.stack(pos), np.stack(quat)
 
     def _max_speed(self, active_t):
         lins, angs = zip(*(C.read_velocity_torch(o, self.device) for o in self.slots))
-        lin = torch.stack(lins).norm(dim=-1)   # (S,N)
+        lin = torch.stack(lins).norm(dim=-1)
         ang = torch.stack(angs).norm(dim=-1)
         lin = torch.where(active_t, lin, torch.zeros_like(lin))
         ang = torch.where(active_t, ang, torch.zeros_like(ang))
         return float(lin.max()), float(ang.max())
 
-    # ------------------------------------------------------------------ one batch
     def _reset_batch(self):
         S = len(self.slots)
         pos = np.zeros((S, self.N, 3))
@@ -218,7 +206,7 @@ class Generator:
                 for s, obj in enumerate(self.slots):
                     m = active[s][:, None]
                     lin = self.rng.uniform(-1, 1, (self.N, 3)) * float(sh.get("lin_vel_mps", 0.15)) * m
-                    lin[:, 2] = np.abs(lin[:, 2])   # kick up/sideways, never into the floor
+                    lin[:, 2] = np.abs(lin[:, 2])
                     ang = self.rng.uniform(-1, 1, (self.N, 3)) * float(sh.get("ang_vel_rps", 2.0)) * m
                     C.write_velocity(obj, lin, ang, None, self.device)
             if osc:
@@ -319,7 +307,6 @@ class Generator:
                   f"mask consistency={v0['mask_consistency']}, valid depth={v0['valid_depth_frac']:.2f}", flush=True)
             print("\n".join(v0["table"] or []), flush=True)
 
-    # ------------------------------------------------------------------ main loop
     def run(self):
         run = self.cfg.run
         total = int(run.num_scenes)

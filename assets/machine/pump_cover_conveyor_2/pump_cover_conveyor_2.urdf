@@ -1,0 +1,425 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="conveyor_2">
+  <!--Meters. Original CAD placement is retained at zero joint positions. Fix the base on import.-->
+  <link name="c2_base">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/frame.stl" scale="1 1 1" />
+      </geometry>
+      <material name="frame_gray">
+        <color rgba="0.30 0.31 0.33 1" />
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="3.48519824 0.413675606 0.534049995" rpy="0 0 0" />
+      <mass value="100" />
+      <inertia ixx="13.542039121310891" iyy="29.63127939391677" izz="24.159359727394108" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_01_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_01_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_01_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_01.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_01.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-2.56739074e-16 1.38777878e-17 0.0225384984" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.09726395541043807" iyy="0.021430639861408956" izz="0.11616669665800235" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_01_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_01_travel_link" />
+    <origin xyz="2.85273613 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-0.14253788909818163" upper="1.4074621109018186" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_01_height" type="prismatic">
+    <parent link="c2_jig_01_travel_link" />
+    <child link="c2_jig_01_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.06557298734501947" upper="0.0444270126549806" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_01_turn" type="continuous">
+    <parent link="c2_jig_01_height_link" />
+    <child link="c2_jig_01_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_02_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_02_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_02_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_02.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_02.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-2.22044605e-16 1.38777878e-17 0.0221000366" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.0972240260782901" iyy="0.021390686641441073" izz="0.11616667277018244" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_02_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_02_travel_link" />
+    <origin xyz="3.05819824 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-0.34800000018750055" upper="1.2019999998124997" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_02_height" type="prismatic">
+    <parent link="c2_jig_02_travel_link" />
+    <child link="c2_jig_02_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.09000000017187502" upper="0.01999999982812504" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_02_turn" type="continuous">
+    <parent link="c2_jig_02_height_link" />
+    <child link="c2_jig_02_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_03_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_03_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_03_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_03.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_03.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-2.22044605e-16 1.38777878e-17 0.0221000366" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.0972240260782901" iyy="0.021390686641441073" izz="0.11616667277018244" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_03_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_03_travel_link" />
+    <origin xyz="3.26819824 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-0.5580000001875005" upper="0.9919999998124998" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_03_height" type="prismatic">
+    <parent link="c2_jig_03_travel_link" />
+    <child link="c2_jig_03_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.09000000017187502" upper="0.01999999982812504" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_03_turn" type="continuous">
+    <parent link="c2_jig_03_height_link" />
+    <child link="c2_jig_03_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_04_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_04_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_04_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_04.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_04.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-2.22044605e-16 1.38777878e-17 0.0221000366" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.0972240260782901" iyy="0.021390686641441073" izz="0.11616667277018244" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_04_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_04_travel_link" />
+    <origin xyz="3.47819824 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-0.7680000001875005" upper="0.7819999998124998" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_04_height" type="prismatic">
+    <parent link="c2_jig_04_travel_link" />
+    <child link="c2_jig_04_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.09000000017187502" upper="0.01999999982812504" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_04_turn" type="continuous">
+    <parent link="c2_jig_04_height_link" />
+    <child link="c2_jig_04_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_05_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_05_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_05_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_05.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_05.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 1.38777878e-17 0.0221000366" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.0972240260782901" iyy="0.02139068664144099" izz="0.11616667277018233" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_05_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_05_travel_link" />
+    <origin xyz="3.68819824 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-0.9780000001875004" upper="0.5719999998124998" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_05_height" type="prismatic">
+    <parent link="c2_jig_05_travel_link" />
+    <child link="c2_jig_05_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.09000000017187502" upper="0.01999999982812504" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_05_turn" type="continuous">
+    <parent link="c2_jig_05_height_link" />
+    <child link="c2_jig_05_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_06_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_06_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_06_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_06.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_06.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="2.22044605e-16 1.38777878e-17 0.0221000366" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.0972240260782901" iyy="0.021390686641441073" izz="0.11616667277018244" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_06_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_06_travel_link" />
+    <origin xyz="3.89819824 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-1.1880000001875004" upper="0.36199999981249986" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_06_height" type="prismatic">
+    <parent link="c2_jig_06_travel_link" />
+    <child link="c2_jig_06_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.09000000017187502" upper="0.01999999982812504" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_06_turn" type="continuous">
+    <parent link="c2_jig_06_height_link" />
+    <child link="c2_jig_06_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <link name="c2_jig_07_travel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_07_height_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="6.6666666666666675e-06" iyy="6.6666666666666675e-06" izz="6.6666666666666675e-06" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="c2_jig_07_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/jig_07.stl" scale="1 1 1" />
+      </geometry>
+      <material name="jig_blue">
+        <color rgba="0.07 0.07 0.08 1" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="meshes/jig_07.stl" scale="1 1 1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="6.73182237e-08 1.38777878e-17 0.0225385059" rpy="0 0 0" />
+      <mass value="5" />
+      <inertia ixx="0.09726395818718381" iyy="0.02143066118880609" izz="0.11616671520865374" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="c2_jig_07_travel" type="prismatic">
+    <parent link="c2_base" />
+    <child link="c2_jig_07_travel_link" />
+    <origin xyz="4.10308015 0.360950615 1.03919995" rpy="0 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="2000" velocity="0.5" lower="-1.3928819110815063" upper="0.15711808891849396" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_07_height" type="prismatic">
+    <parent link="c2_jig_07_travel_link" />
+    <child link="c2_jig_07_height_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.5" lower="-0.06279027250126944" upper="0.04720972749873063" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="c2_jig_07_turn" type="continuous">
+    <parent link="c2_jig_07_height_link" />
+    <child link="c2_jig_07_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="12" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+</robot>

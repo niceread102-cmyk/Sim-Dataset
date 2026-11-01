@@ -1,5 +1,4 @@
-"""COCO instance-segmentation JSON per scene (same layout as bop_toolkit's scene_gt_coco.json).
-Masks are uncompressed RLE (column-major), readable by pycocotools / detectron2 / mmdet."""
+"""COCO instance segmentation JSON per scene (uncompressed RLE masks, like bop_toolkit's scene_gt_coco.json)."""
 from __future__ import annotations
 
 import numpy as np
@@ -13,12 +12,11 @@ def rle_encode(mask: np.ndarray) -> dict:
     change = np.flatnonzero(flat[1:] != flat[:-1]) + 1
     runs = np.diff(np.r_[0, change, flat.size]).tolist()
     if flat[0] == 1:
-        runs = [0] + runs  # COCO RLE always starts with a run of zeros
+        runs = [0] + runs
     return {"counts": runs, "size": [h, w]}
 
 
 def rle_encode_crop(crop: np.ndarray, x0: int, y0: int, H: int, W: int) -> dict:
-    """rle_encode() of an (H, W) mask that is zero outside `crop` placed at (x0, y0), without building the full mask."""
     h, w = crop.shape
     cols = np.zeros((w, H), np.uint8)
     cols[:, y0:y0 + h] = crop.T
@@ -66,8 +64,6 @@ class CocoScene:
 
     def add_instance_rle(self, im_id: int, obj_id: int, rle: dict, area: int, bbox_visib, visib_fract: float,
                          ignore_below: float = 0.1, gt_idx: int | None = None):
-        """gt_idx: index of this part in scene_gt.json / scene_gt_info.json of the same image (= instance map value - 1),
-        so a COCO mask can be matched to its 6D pose (COCO leaves out parts that are not visible)."""
         ann = {"id": self._ann, "image_id": im_id, "category_id": obj_id, "iscrowd": 0, "area": area,
                "bbox": bbox_visib, "segmentation": rle, "visib_fract": visib_fract,
                "ignore": bool(visib_fract is not None and visib_fract < ignore_below)}

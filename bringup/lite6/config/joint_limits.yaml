@@ -1,14 +1,4 @@
-# lite6: written from the URDF by isaacsim/make_robot_config.py at every run: change the URDF (or --accel-factor), not this file.
-# Velocities are the URDF velocity limits; MoveIt's time-optimal trajectory generation needs an acceleration:
-# 2 x the velocity. With has_acceleration_limits: false it throws an "undefined" error and nothing can be executed.
-# Position and effort limits are the URDF's (MoveIt reads position from there; the sim drive force limit is the effort), listed
-# here to read: position deg (m), velocity rad/s (m/s), effort N*m (N):
-#   joint1: position ±360, velocity 3.14, effort 50
-#   joint2: position ±150, velocity 3.14, effort 50
-#   joint3: position -3.5 ~ 300, velocity 3.14, effort 32
-#   joint4: position ±360, velocity 3.14, effort 32
-#   joint5: position ±124, velocity 3.14, effort 32
-#   joint6: position ±360, velocity 3.14, effort 20
+# lite6: MoveIt joint limits, velocity = the URDF limit, acceleration = 2 x velocity. Written from the URDF by isaacsim/make_robot_config.py at every run.
 joint_limits:
   joint1:
     has_velocity_limits: true

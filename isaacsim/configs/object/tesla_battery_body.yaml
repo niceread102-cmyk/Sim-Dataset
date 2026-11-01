@@ -1,0 +1,25 @@
+# Part tesla_battery_body: mesh, physics, look, parts per bin, pose in a map, layer orientation. Made by isaacsim/make_object_config.py.
+name: tesla_battery_body
+mesh: ../../../assets/object/stl/tesla_battery_body.stl
+units: mm
+recenter: true
+mass_kg: 2039
+friction: 0.5
+restitution: 0.0
+collision: convexDecomposition
+max_convex_hulls: 32
+color: [0.285714, 0.285711, 0.285711]
+color_tint: [0.660232, 0.660225, 0.660225]
+roughness: 0.5
+metallic: 1.0
+count: [1, 1]
+
+pos_m: [1.2, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+
+layer_rpy_deg: [0, 0, 0]
+
+grasps:
+  suction_auto: {num: 48, seed: 0}
+  suction: []
+  parallel_jaw: []

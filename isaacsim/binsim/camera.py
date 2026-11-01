@@ -1,4 +1,4 @@
-"""Camera model from config: intrinsics at render resolution + viewpoint sampling around the mount."""
+"""Camera model from the config: intrinsics at render resolution and viewpoints sampled around the mount."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
-    dist: tuple = ()  # lens distortion (k1, k2, p1, p2, k3), OpenCV convention (binsim/lens.py); () = ideal pinhole
+    dist: tuple = ()
 
     @property
     def K(self) -> np.ndarray:
@@ -27,20 +27,15 @@ class Intrinsics:
         out = {"width": self.width, "height": self.height, "fx": self.fx, "fy": self.fy,
                "cx": self.cx, "cy": self.cy, "K": self.K.tolist()}
         if self.dist:
-            out["dist"] = list(self.dist)  # k1, k2, p1, p2, k3
+            out["dist"] = list(self.dist)
         return out
 
 
 def centred(intr: Intrinsics) -> Intrinsics:
-    """The same camera with the principal point at the image centre. The USD camera (focal length + apertures) of the
-    Isaac Sim renderer always projects the optical axis to the centre, whatever cx/cy the config gives, so this is the
-    K of the rendered images (checked: labels re-rendered with it match the saved masks 100 %, the config K 63 %)."""
     return Intrinsics(intr.width, intr.height, intr.fx, intr.fy, (intr.width - 1) / 2.0, (intr.height - 1) / 2.0)
 
 
 def intrinsics_from_cfg(cam_cfg) -> Intrinsics:
-    """K for the RENDERED image (resolution * render_scale). Pixel centers follow the OpenCV
-    convention; scaling uses (c + 0.5) * s - 0.5 so the principal point stays consistent."""
     W, H = cam_cfg["resolution"]
     s = float(cam_cfg.get("render_scale", 1.0))
     w, h = int(round(W * s)), int(round(H * s))
@@ -62,15 +57,11 @@ def rim_height(bin_cfg, bin_geom: BinGeom) -> float:
 
 
 def mount_eye_target(cam_cfg, bin_cfg, bin_geom: BinGeom):
-    """Nominal camera eye, look-at target and image-up direction in the BIN frame.
-
-    `mount.T_bin_cam` (measured camera pose, e.g. from hand-eye calibration: 4x4 row-major, meters, OpenCV camera
-    axes, see scripts/camera_mount_from_calib.py) overrides height_above_rim_m / offset_m / look_at_m."""
     m = cam_cfg.get("mount", {})
     if m.get("T_bin_cam") is not None:
         T = np.asarray(m["T_bin_cam"], float).reshape(4, 4)
         eye, z = T[:3, 3].copy(), T[:3, 2]
-        s = (bin_geom.floor_z - eye[2]) / z[2] if abs(z[2]) > 1e-6 else 1.0  # where the optical axis meets the floor
+        s = (bin_geom.floor_z - eye[2]) / z[2] if abs(z[2]) > 1e-6 else 1.0
         return eye, eye + z * s, -T[:3, 1]
     eye = np.array([*m.get("offset_m", [0, 0, 0])[:2], 0.0])
     eye[2] = rim_height(bin_cfg, bin_geom) + float(m.get("height_above_rim_m", 0.5)) + float(m.get("offset_m", [0, 0, 0])[2])
@@ -80,8 +71,6 @@ def mount_eye_target(cam_cfg, bin_cfg, bin_geom: BinGeom):
 
 def sample_view(cam_cfg, bin_cfg, bin_geom: BinGeom, rng, jitter: bool = True, height_offset: float = 0.0,
                 xy_offset=(0.0, 0.0)) -> np.ndarray:
-    """4x4 camera-to-bin transform (OpenCV camera axes) for one view. height_offset (m) moves the camera eye up/down,
-    xy_offset (m, bin frame) moves eye and look-at point sideways (camera.follow_pile)."""
     eye, target, up = mount_eye_target(cam_cfg, bin_cfg, bin_geom)
     shift = np.array([float(xy_offset[0]), float(xy_offset[1]), 0.0])
     eye = eye + shift + np.array([0.0, 0.0, float(height_offset)])

@@ -1,41 +1,10 @@
 #!/usr/bin/env python3
-"""Config files of a new robot from its URDF: the simulation yaml and the whole MoveIt bringup folder.
+"""make_robot_config.py: config files of a new robot from its URDF: configs/robot/<name>.yaml and the MoveIt folder bringup/<name>/
+(srdf, kinematics, joint limits, ompl, controllers, ik_node.yaml, rviz).
 
-    python3 make_robot_config.py robot:=hdr50_22 [--ee-link tool0] [--tcp 0 0 0.15] [--seed 0 30 -60 0 45 0]
-                                 [--force] [--no-check] [--out DIR]
+    python3 make_robot_config.py robot:=<name> [--ee-link tool0] [--tcp 0 0 0.15] [--seed ...] [--force] [--no-check] [--out DIR]
 
-Input   assets/robot/<name>/urdf/<name>.urdf   (meshes relative to it, e.g. ../meshes/visual/base.stl, or package://<pkg>/... found in the URDF
-        folder or a folder above it, as xacro writes them). <name> is the name of the URDF FILE: a
-        robot with several URDFs in one folder (m20_35_18d.urdf, m20_35_18d_jegg2510n.urdf with the gripper) is one robot per file:
-        robot:=m20_35_18d_jegg2510n makes its own yaml and bringup folder, the arm-only m20_35_18d stays as it is.
-Output  isaacsim/configs/robot/<name>.yaml        name, start pose, stiffness, damping, speed, MoveIt speed and joint limits, controller
-        bringup/<name>/config/                      <name>.srdf, kinematics, joint_limits, ompl_planning, moveit_controllers, ik_node
-        bringup/<name>/rviz/demo.rviz
-then       lab robot_sim.py robot:=<name> [map:=<map>]                 (Isaac Sim side, the joint drive force limit is the URDF effort)
-           ros2 launch robot.launch.py robot:=<name> [map:=<map>]      (bringup/integration/launch: MoveIt + ik_node)
-
-What comes from the URDF: the base link (below the empty `world` root), the arm joints from there to the end frame, their velocity
-limits (acceleration = --accel-factor x velocity: MoveIt's time parametrization needs one), the robot name of the SRDF, the links
-that touch by construction (collision check off: parent - child, fixed-joint bodies, siblings such as gripper fingers), the joints
-that can turn more than a full turn (wrap_joints_deg of ik_node.yaml: ik_node picks their angle nearest to the current one).
-Chosen here (override with the options):
-  end frame   --ee-link: IK target, z axis = tool direction (rpy 180 0 0 = tool pointing down). Default: the tool0 / tcp / flange
-              frame below the last joint.  --tcp: the TCP (gripper tip) in that frame. Default: where a link with `tcp` in its name
-              (gripper_tcp of a URDF with the gripper) is in that frame, else 0.
-  gripper     joints that are not part of the arm and not mimic joints (the fingers of a URDF with the gripper) are written as
-              gripper_joints: to the sim yaml: /gripper/command drives them, robot_sequence.py waits for them.
-  ready pose  --seed (deg): start pose of the sim = IK seed = home of the SRDF. Default: the best pose found by forward kinematics
-              (tool pointing down, in front of the robot, elbow up, away from joint limits and singularities) that MoveIt accepts.
-  sim drives  stiffness 20000 N*m/deg, damping 1000, speed 0.3 (the values of m20_35_18d): tune them in the sim.
-  MoveIt      velocity_scaling 0.15, acceleration_scaling 0.05, no narrower joint limits (joint_limits_deg {}): change them in the robot yaml.
-The MoveIt check (isolated ROS domain, needs ROS sourced; --no-check skips it) finds the link pairs that collide in every pose
-(meshes that overlap at the joints), turns their collision check off, and takes the first ready pose that is collision free.
-Files that already exist are kept (--force overwrites them) except joint_limits.yaml: it holds nothing but what the URDF says, so
-every run writes it again from the URDF (velocity limits, acceleration, the position ranges in the comment on top). An existing
-robot yaml is read (controller, joint_pos).
---out DIR writes everything below DIR instead of the project (no check).
-Nothing else has to be registered: run_isaacsim.py, robot_sim.py, robot.launch.py and control/robot_sequence.py find the robot by its
-files (configs/robot/<name>.yaml, bringup/<name>/). The robot stands at the origin; a map puts it somewhere else (scene.robot_pose).
+The URDF is assets/robot/<name>/urdf/<name>.urdf; with ROS sourced it checks the collision pairs and the ready pose with move_group.
 """
 import argparse
 import math
@@ -55,19 +24,17 @@ import yaml
 
 import sim_config
 
-HERE = Path(__file__).resolve().parent                    # Simulation/isaacsim
-SIM_DIR = HERE.parent                                     # Simulation
+HERE = Path(__file__).resolve().parent
+SIM_DIR = HERE.parent
 BRINGUP_DIR = SIM_DIR / "bringup"
 ROBOTS_DIR = HERE / "configs" / "robot"
 LAUNCH = BRINGUP_DIR / "integration" / "launch" / "robot.launch.py"
-GROUP = "arm"                                             # planning group of every robot
+GROUP = "arm"
 MOVABLE = ("revolute", "continuous", "prismatic")
-REFRESH = ("lim",)                                        # files that are written again at every run (only the URDF in them)
-EE_NAMES = ("tool0", "link_tcp", "tcp", "fanuc_flange", "tool", "flange", "ee_link")  # end frame candidates (z = tool direction), first match wins
-CHECK_DOMAIN = "88"                                       # isolated ROS domain of the MoveIt check
+REFRESH = ("lim",)
+EE_NAMES = ("tool0", "link_tcp", "tcp", "fanuc_flange", "tool", "flange", "ee_link")
+CHECK_DOMAIN = "88"
 
-
-# ---------------------------------------------------------------- URDF
 
 def _vec(s):
     return np.array([float(x) for x in (s or "0 0 0").split()])
@@ -81,7 +48,6 @@ def _rpy_to_R(r, p, y):
 
 
 def _axis_R(axis, q):
-    """Rotations about `axis` by the angles q (N,) -> (N, 3, 3)."""
     a = axis / np.linalg.norm(axis)
     K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
     s, c = np.sin(q)[:, None, None], np.cos(q)[:, None, None]
@@ -101,8 +67,7 @@ class Urdf:
         self.joints = self.root.findall("joint")
         self.parent_joint = {j.find("child").get("link"): j for j in self.joints}
 
-    def base_link(self) -> str:
-        """The root link, or the link below it when the root is an empty frame (`world`) holding the robot by a fixed joint."""
+    def base_link(self) -> str: 
         root = next(n for n in self.links if n not in self.parent_joint)
         kids = [j for j in self.joints if j.find("parent").get("link") == root]
         empty = all(self.links[root].find(t) is None for t in ("visual", "collision", "inertial"))
@@ -111,7 +76,6 @@ class Urdf:
         return root
 
     def chain(self, base: str, tip: str) -> list:
-        """Joints from base to tip."""
         out, link = [], tip
         while link != base:
             j = self.parent_joint.get(link)
@@ -122,7 +86,6 @@ class Urdf:
         return out[::-1]
 
     def relative_pose(self, a: str, b: str):
-        """4x4 pose of link b in the frame of link a (both held together by fixed joints below their common ancestor), None otherwise."""
         def up(n):
             out = [n]
             while n in self.parent_joint:
@@ -145,17 +108,14 @@ class Urdf:
         return None if top is None or Ta is None or Tb is None else np.linalg.inv(Ta) @ Tb
 
     def tcp_offset(self, ee: str):
-        """Position of the first link with `tcp` in its name (not the end frame itself) in the end frame, None if there is none."""
         for n in self.links:
             if "tcp" in n.lower() and n != ee:
                 T = self.relative_pose(ee, n)
                 if T is not None:
-                    return [round(float(x), 6) + 0.0 for x in T[:3, 3]]   # + 0.0: no -0.0
+                    return [round(float(x), 6) + 0.0 for x in T[:3, 3]]
         return None
 
     def default_ee_link(self, base: str) -> str:
-        """The end frame: below the last revolute joint of the longest revolute chain from the base (the arm; gripper joints
-        and the like are not counted), through fixed joints only. The first name of EE_NAMES that is there, else the last."""
         parents = {j.find("parent").get("link") for j in self.joints}
         arm = max((self.chain(base, n) for n in self.links if n not in parents and n != base),
                   key=lambda c: sum(j.get("type") in ("revolute", "continuous") for j in c))
@@ -168,9 +128,6 @@ class Urdf:
         return next((w for w in EE_NAMES if w in below), below[-1])
 
     def linked_pairs(self) -> set:
-        """Pairs of links that touch by construction and are not worth a collision check: parent - child, links held
-        together by fixed joints (they never move against each other) and links mounted on the same parent (the two
-        fingers of a gripper, which overlap in the start pose)."""
         group = {n: n for n in self.links}
 
         def find(n):
@@ -189,7 +146,7 @@ class Urdf:
         bodies = {}
         for n in self.links:
             bodies.setdefault(find(n), []).append(n)
-        for ls in list(bodies.values()) + list(kids.values()):   # rigid bodies, siblings (frames without geometry left out)
+        for ls in list(bodies.values()) + list(kids.values()):
             ls = [n for n in ls if self.links[n].find("collision") is not None]
             pairs |= {tuple(sorted((x, y))) for i, x in enumerate(ls) for y in ls[i + 1:]}
         return pairs
@@ -203,8 +160,6 @@ class Urdf:
         return T
 
     def fk(self, chain: list, q: np.ndarray):
-        """Batch forward kinematics: q (N, movable joints of the chain) -> end frame (N, 4, 4) and the origin (N, 3) of every
-        movable joint, all in the frame of the chain's base."""
         T = np.tile(np.eye(4), (len(q), 1, 1))
         k, origins = 0, []
         for j in chain:
@@ -218,7 +173,6 @@ class Urdf:
         return T, origins
 
     def gravity_torque(self, q: dict) -> dict:
-        """|gravity torque| (N*m) about every movable joint for the pose q {joint: rad} (links with an <inertial> mass)."""
         T = {}
 
         def pose(n):
@@ -247,7 +201,7 @@ class Urdf:
             return out
         out = {}
         for j in (j for j in self.joints if j.get("type") in MOVABLE):
-            frame = pose(j.find("parent").get("link")) @ self.origin(j)       # the joint before its own rotation
+            frame = pose(j.find("parent").get("link")) @ self.origin(j)
             axis, p = frame[:3, :3] @ _axis(j), frame[:3, 3]
             out[j.get("name")] = abs(float(sum(axis @ np.cross((pose(n) @ np.append(com[n], 1))[:3] - p, [0, 0, -m * 9.81])
                                                for n, m in mass.items() if j.get("name") in above(n))))
@@ -255,11 +209,8 @@ class Urdf:
 
 
 def find_urdf(name: str):
-    """assets/robot/<name>/urdf/<name>.urdf, or <name>.urdf in another assets/robot/*/urdf/ folder (several URDFs of one robot share a folder)."""
     return Path(sim_config.find_urdf(name))
 
-
-# ---------------------------------------------------------------- ready pose
 
 def position_limits(joints: list):
     lo, hi = [], []
@@ -273,8 +224,6 @@ def position_limits(joints: list):
 
 
 def position_range(j) -> str:
-    """Position range of a movable URDF joint as the URDF says it, to read: deg (m for a prismatic joint), `continuous` without
-    limits. Two decimals (lite6 joint3 starts at -3.5 deg), ±x for a range around zero."""
     lim = j.find("limit")
     if j.get("type") == "continuous" or lim is None or lim.get("lower") is None:
         return "continuous"
@@ -282,14 +231,11 @@ def position_range(j) -> str:
     unit = " m" if j.get("type") == "prismatic" else ""
     if not unit:
         lo, hi = math.degrees(lo), math.degrees(hi)
-    lo, hi = round(lo, 2) + 0.0, round(hi, 2) + 0.0       # + 0.0: no "-0"
+    lo, hi = round(lo, 2) + 0.0, round(hi, 2) + 0.0
     return (f"±{hi:g}" if lo == -hi else f"{lo:g} ~ {hi:g}") + unit
 
 
 def wrap_joints(joints: list) -> dict:
-    """Joints whose position range is wider than a full turn (360 deg, or no limits at all): name -> (min, max) in deg, for the
-    wrap_joints_deg of ik_node.yaml. q and q +- 360 are one pose there, so the IK may return any of them and the arm would spin
-    once round. A narrower joint has one angle per pose and is left out, a prismatic joint never turns."""
     out = {}
     for j in joints:
         if j.get("type") == "prismatic":
@@ -303,19 +249,12 @@ def wrap_joints(joints: list) -> dict:
 
 
 def wrap_joints_text(wrap: dict) -> str:
-    """wrap_joints_deg block of ik_node.yaml (with its comment)"""
     num = lambda v: ".inf" if v == math.inf else "-.inf" if v == -math.inf else f"{v + 0.0:.6f}".rstrip("0").rstrip(".")
     rows = "".join(f"\n  {j}: [{num(lo)}, {num(hi)}]" for j, (lo, hi) in wrap.items()) if wrap else " {}"
-    return ("# Joints that can turn more than a full turn (position range wider than 360 deg in the URDF) and that range (deg). The IK can\n"
-            "# return the angle of such a joint a full turn off (q +- 360) and the arm would spin once round to reach it: ik_node sends the\n"
-            "# equivalent angle nearest to the current one (inside this range and joint_limits_deg). Joints not listed are sent as solved.\n"
-            f"wrap_joints_deg:{rows}\n")
+    return f"wrap_joints_deg:{rows}\n"
 
 
 def ready_candidates(urdf: Urdf, chain: list, count: int = 12):
-    """Candidate ready poses (rad), best first, and the reach (m). Tool pointing down (z axis of the end frame), in front of
-    the robot, elbow up (joint 3 above joint 2), away from the joint limits and from singularities. The first and the last
-    joint stay at 0, the others are searched on a 15 degree grid (roll joints of more than 360 degrees within +-90)."""
     movable = [j for j in chain if j.get("type") in MOVABLE]
     n = len(movable)
     lo, hi = position_limits(movable)
@@ -335,7 +274,7 @@ def ready_candidates(urdf: Urdf, chain: list, count: int = 12):
     p, tool_z = T[:, :3, 3], T[:, :3, 2]
     reach = float(np.linalg.norm(p[:, [0, 2]], axis=1).max())
     idx = []
-    for tilt, h_min, d_min in ((10, 0.10, 0.25), (20, 0.05, 0.15), (35, 0.0, 0.0)):   # relax if nothing fits
+    for tilt, h_min, d_min in ((10, 0.10, 0.25), (20, 0.05, 0.15), (35, 0.0, 0.0)):
         ok = (tool_z[:, 2] <= -math.cos(math.radians(tilt))) & (p[:, 2] >= h_min * reach) & (p[:, 0] >= d_min * reach)
         if n >= 3:
             ok &= org[2][:, 2] >= org[1][:, 2]
@@ -345,12 +284,11 @@ def ready_candidates(urdf: Urdf, chain: list, count: int = 12):
     if not len(idx):
         return [], reach
     q = grid[idx]
-    margin = np.minimum((q - lo) / span, (hi - q) / span).min(axis=1)              # 0 at a limit .. 0.5 in the middle
+    margin = np.minimum((q - lo) / span, (hi - q) / span).min(axis=1)
     place = np.abs(p[idx, 0] - 0.5 * reach) / reach + np.abs(p[idx, 2] - 0.45 * reach) / reach
     cheap = 2.0 * margin - place - 0.3 * (np.abs(q[:, 0]) + np.abs(q[:, -1])) / math.pi
     order = np.argsort(-cheap)[:300]
     sel = idx[order]
-    # conditioning of the Jacobian (position in m, rotation x 0.5 reach) of the best few hundred: far from singularities
     eps, J = 1e-4, np.zeros((len(sel), 6, n))
     T0, _ = urdf.fk(chain, grid[sel])
     for k in range(n):
@@ -367,14 +305,12 @@ def ready_candidates(urdf: Urdf, chain: list, count: int = 12):
     total = cheap[order] + 1.5 * s[:, -1] / np.maximum(s[:, 0], 1e-9)
     out = []
     for k in np.argsort(-total):
-        if all(np.abs(grid[sel[k]] - o).max() > math.radians(30) for o in out):    # candidates that really differ
+        if all(np.abs(grid[sel[k]] - o).max() > math.radians(30) for o in out):
             out.append(grid[sel[k]])
         if len(out) >= count:
             break
     return out, reach
 
-
-# ---------------------------------------------------------------- file texts
 
 def srdf_text(urdf: Urdf, base: str, ee: str, arm: list, home: dict, always: list) -> str:
     pairs = {p: "Adjacent" for p in urdf.linked_pairs()}
@@ -393,13 +329,8 @@ def srdf_text(urdf: Urdf, base: str, ee: str, arm: list, home: dict, always: lis
 
 
 def joint_limits_text(name, rows, factor, ranges, efforts) -> str:
-    out = [f"# {name}: written from the URDF by isaacsim/make_robot_config.py at every run: change the URDF (or --accel-factor), not this file.",
-           "# Velocities are the URDF velocity limits; MoveIt's time-optimal trajectory generation needs an acceleration:",
-           f"# {factor:g} x the velocity. With has_acceleration_limits: false it throws an \"undefined\" error and nothing can be executed.",
-           "# Position and effort limits are the URDF's (MoveIt reads position from there; the sim drive force limit is the effort), listed",
-           "# here to read: position deg (m), velocity rad/s (m/s), effort N*m (N):"]
-    out += [f"#   {j}: position {r}, velocity {v:g}, effort {e:g}" for (j, v), r, e in zip(rows, ranges, efforts)]
-    out += ["joint_limits:"]
+    out = [f"# {name}: MoveIt joint limits, velocity = the URDF limit, acceleration = {factor:g} x velocity. Written from the URDF by isaacsim/make_robot_config.py at every run.",
+           "joint_limits:"]
     for j, vel in rows:
         out += [f"  {j}:", "    has_velocity_limits: true", f"    max_velocity: {vel!r}",
                 "    has_acceleration_limits: true", f"    max_acceleration: {factor * vel!r}"]
@@ -407,13 +338,12 @@ def joint_limits_text(name, rows, factor, ranges, efforts) -> str:
 
 
 def kinematics_text(name) -> str:
-    return (f"# {name}: generated by isaacsim/make_robot_config.py\n{GROUP}:\n  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin\n"
+    return (f"# {name}: MoveIt IK solver of the planning group. Generated by isaacsim/make_robot_config.py.\n{GROUP}:\n  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin\n"
             "  kinematics_solver_search_resolution: 0.005\n  kinematics_solver_timeout: 0.05\n")
 
 
 def ompl_text(name, arm) -> str:
-    return f"""# {name}: generated by isaacsim/make_robot_config.py, the structure of bringup/m20_35_18d (MoveIt2 Jazzy: planning_plugins
-# (plural) + request_adapters / response_adapters).
+    return f"""# {name}: MoveIt OMPL planning pipeline of the planning group (MoveIt2 Jazzy). Generated by isaacsim/make_robot_config.py.
 planning_plugins:
   - ompl_interface/OMPLPlanner
 request_adapters:
@@ -442,12 +372,9 @@ planner_configs:
 
 def controllers_text(name, controller, arm) -> str:
     joints = "\n".join(f"      - {j}" for j in arm)
-    return f"""# {name}: generated by isaacsim/make_robot_config.py. The FollowJointTrajectory action server is provided by isaacsim/robot_sim.py
-# (controller: of configs/robot/{name}.yaml). The action name is "<controller name>/<action_ns>", here
-# /{controller}/follow_joint_trajectory.
+    return f"""# {name}: the controller MoveIt executes on, /{controller}/follow_joint_trajectory (served by isaacsim/robot_sim.py). Generated by isaacsim/make_robot_config.py.
 moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
 
-# MoveIt only moves the robot: its built-in execution time limit (TIMED_OUT) is switched off.
 trajectory_execution:
   execution_duration_monitoring: false
 
@@ -466,50 +393,38 @@ moveit_simple_controller_manager:
 
 def ik_node_text(name, base, ee, arm, tcp, seed_deg, wrap) -> str:
     fmt = lambda v: "[" + ", ".join(f"{x:g}" for x in v) + "]"
-    return f"""# Parameters of control/ik_node.py for {name} (generated by isaacsim/make_robot_config.py).
-base_frame: {base}   # frame of /target_pose and the IK: the Isaac Sim world (robot.launch.py puts where the robot stands in the map, scene.robot_pose, into MoveIt's URDF)
-group_name: {GROUP}                   # config/{name}.srdf
-ee_link: {ee}                    # z axis = tool direction, so rpy (180, 0, 0) = tool pointing down
+    return f"""# {name}: parameters of control/ik_node.py (frames, arm joints, TCP offset, IK seed in deg, full-turn joints). Generated by isaacsim/make_robot_config.py.
+base_frame: {base}
+group_name: {GROUP}
+ee_link: {ee}
 arm_joints: [{", ".join(arm)}]
-tcp_offset: {fmt(tcp)}            # m, TCP (gripper tip) in the ee_link frame
-
-# IK seed (deg), in arm_joints order: the ready pose (= start pose of the sim).
-# ik_node.py solves from the current joint angles: this pose is only its start before /joint_states arrives (and the start of the
-# first IK of control/robot_sequence.py).
+tcp_offset: {fmt(tcp)}
 ik_seed_deg: {fmt(seed_deg)}
-
-# Speed (velocity_scaling, acceleration_scaling) and narrower joint limits (joint_limits_deg) are the robot's: isaacsim/configs/robot/{name}.yaml
-
 {wrap_joints_text(wrap)}"""
 
 
 def sim_yaml_text(name, urdf_rel, controller, home, stiffness, damping, speed, gripper) -> str:
     start = ", ".join(f"{j}: {v:.4f}" for j, v in home.items() if abs(v) > 1e-9)
-    grip = (f"gripper_joints: [{', '.join(gripper)}]        # joints of the URDF that /gripper/command drives (0 = lower limit, 1 = upper limit; mimic joints follow)\n"
-            if gripper else "")
-    return f"""# lab robot_sim.py robot:={name}    (URDF: ../../../{urdf_rel}, MoveIt: ros2 launch robot.launch.py robot:={name})
-# Generated by isaacsim/make_robot_config.py. Only the robot is here, the same in every map: what stands around it is the map (configs/map/<map>.yaml, map:=<map>).
+    grip = f"gripper_joints: [{', '.join(gripper)}]\n" if gripper else ""
+    return f"""# {name}: the robot in isaacsim/robot_sim.py and MoveIt (URDF ../../../{urdf_rel}, gripper, start pose in rad, drives, speeds, limits), the same in every map.
+# Generated by isaacsim/make_robot_config.py.   lab robot_sim.py robot:={name}   |   ros2 launch robot.launch.py robot:={name}
 name: {name}
 gripper: none
-{grip}pos_m: [0.0, 0.0, 0.0]            # mount of the robot base (m) = 0 for every robot: where it stands in a map is scene.robot_pose of the map
+{grip}pos_m: [0.0, 0.0, 0.0]
 rpy_deg: [0, 0, 0]
 joint_pos: {{{start}}}
-                                  # start pose (rad) = the ready pose = ik_seed_deg of bringup/{name}/config/ik_node.yaml
-stiffness: {stiffness:g}                  # joint drives, N*m/deg (prismatic: N/m). Higher = less sag. The force limit is the URDF effort
-damping: {damping:g}                     # higher = less swinging, slower settling
-speed: {speed:g}                        # max joint speed = speed x URDF velocity limit
-velocity_scaling: 0.15            # MoveIt (ik_node.py, robot_sequence.py): share of the joint velocity limits the motions use (1.0 = full)
-acceleration_scaling: 0.05        # MoveIt: share of the acceleration limits (bringup/<robot>/config/joint_limits.yaml)
-joint_limits_deg: {{}}              # narrower position range per joint than the URDF (deg), e.g. {{J1: [-90, 90]}}: MoveIt plans and solves the IK inside it (the start pose has to be inside too)
-physics_hz: 60                    # physics steps per simulated second
-controller: /{controller}  # <controller>/joint_trajectory, <controller>/follow_joint_trajectory (bringup/{name}/config/moveit_controllers.yaml)
+stiffness: {stiffness:g}
+damping: {damping:g}
+speed: {speed:g}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {{}}
+physics_hz: 60
+controller: /{controller}
 """
 
 
-# ---------------------------------------------------------------- MoveIt check
-
 def _stop(proc):
-    """Stop ros2 launch and everything it started (own process group): INT, then TERM, then KILL."""
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(proc.pid, sig)
@@ -521,15 +436,12 @@ def _stop(proc):
         except subprocess.TimeoutExpired:
             continue
     try:
-        os.killpg(proc.pid, signal.SIGKILL)       # whatever is left of the group
+        os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
 
 
 def moveit_check(name, arm, lo, hi, candidates, log):
-    """Start move_group (ros2 launch robot.launch.py in the isolated ROS domain) and ask /check_state_validity about random
-    poses and the candidate ready poses. Returns (link pairs that collide in (nearly) every pose, index of the first
-    collision free candidate or None, share of the random poses in collision)."""
     import rclpy
     from moveit_msgs.msg import RobotState
     from moveit_msgs.srv import GetStateValidity
@@ -537,7 +449,7 @@ def moveit_check(name, arm, lo, hi, candidates, log):
     proc = subprocess.Popen(["ros2", "launch", str(LAUNCH), f"robot:={name}", "rviz:=false", "ik_node:=false"],
                             stdout=open(log, "w"), stderr=subprocess.STDOUT, start_new_session=True)
     try:
-        rclpy.init(args=[])   # robot:=<name> of the command line is not a ROS remap rule
+        rclpy.init(args=[])
         node = rclpy.create_node("make_robot_config")
         cli = node.create_client(GetStateValidity, "/check_state_validity")
         t0 = time.monotonic()
@@ -573,12 +485,10 @@ def moveit_check(name, arm, lo, hi, candidates, log):
     finally:
         try:
             rclpy.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         _stop(proc)
 
-
-# ---------------------------------------------------------------- main
 
 def _robot(a: str) -> str:
     return a[len("robot:="):] if a.startswith("robot:=") else a
@@ -604,7 +514,7 @@ def main():
     urdf_path = find_urdf(name)
     if not urdf_path.is_file():
         sys.exit(f"URDF not found: assets/robot/{name}/urdf/{name}.urdf (or {name}.urdf in another assets/robot/*/urdf/)")
-    tree = ET.parse(urdf_path)                  # mesh paths of xacro (package://...) -> paths relative to the urdf folder, written back into the URDF
+    tree = ET.parse(urdf_path)
     fixed = 0
     for m in tree.getroot().iter("mesh"):
         found = sim_config.find_mesh(m.get("filename"), str(urdf_path.parent))
@@ -621,7 +531,7 @@ def main():
     base = urdf.base_link()
     ee = args.ee_link or urdf.default_ee_link(base)
     root = next(n for n in urdf.links if n not in urdf.parent_joint)
-    frame = root if root != base else base      # the empty `world` above the robot, else the base link: the frame of /target_pose
+    frame = root if root != base else base
     chain = urdf.chain(base, ee)
     movable = [j for j in chain if j.get("type") in MOVABLE]
     arm = [j.get("name") for j in movable]
@@ -647,7 +557,6 @@ def main():
     existing = (yaml.safe_load(open(yaml_file)) or {}) if yaml_file.is_file() else {}
     controller = (args.controller or str(existing.get("controller") or f"/{name}_traj_controller")).strip("/")
 
-    # ready pose candidates: --seed, joint_pos of an existing robot yaml, or the search
     if args.seed:
         if len(args.seed) != len(arm):
             sys.exit(f"--seed needs {len(arm)} values, one per arm joint {arm}")
@@ -674,7 +583,6 @@ def main():
                 "ik": ik_node_text(name, frame, ee, arm, args.tcp, [math.degrees(v) for v in q], wrap_joints(movable))}
 
     def put(key, text):
-        """Write a file unless it exists (a file written in this run may be written again)."""
         f = files[key]
         if f.exists() and not args.force and key not in created and key not in REFRESH:
             made[key] = False
@@ -689,17 +597,16 @@ def main():
     src = next((p for p in sorted(BRINGUP_DIR.glob("*/rviz/demo.rviz")) if p.parent.parent.name != name), None)
     if src is None:
         print("[WARN] no bringup/*/rviz/demo.rviz to copy as the RViz layout", flush=True)
-    else:   # the layout of another robot with this robot's fixed frame and planning group
+    else:
         s = re.sub(r"(?m)^(\s*Fixed Frame:\s*).*$", rf"\g<1>{base}", src.read_text())
         put("rviz", re.sub(r"(?m)^(\s*Planning Group:\s*).*$", rf"\g<1>{GROUP}", s))
 
-    # MoveIt check: link pairs that collide in every pose, first collision free ready pose
     ready_i, note = 0, "not checked"
     if not args.no_check and not args.out:
         if shutil.which("ros2") is None:
             note = "skipped: ROS 2 is not sourced (source /opt/ros/jazzy/setup.bash and run again with --force)"
         else:
-            os.environ["ROS_DOMAIN_ID"], os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = CHECK_DOMAIN, "LOCALHOST"  # apart from other ROS terminals
+            os.environ["ROS_DOMAIN_ID"], os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = CHECK_DOMAIN, "LOCALHOST"
             log = Path(tempfile.gettempdir()) / f"make_robot_config_{name}.log"
             try:
                 print("[INFO] MoveIt check: starting move_group in the isolated ROS domain (about a minute) ...", flush=True)
@@ -719,10 +626,9 @@ def main():
                         if k in created:
                             put(k, t[k])
                 log.unlink(missing_ok=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 note = f"check failed: {e}"
 
-    # summary
     q = candidates[ready_i]
     T, _ = urdf.fk(chain, q[None])
     tilt = math.degrees(math.acos(float(np.clip(-T[0, 2, 2], -1, 1))))

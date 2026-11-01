@@ -1255,7 +1255,7 @@
   <joint name="seat_turn_over_mount" type="fixed">
     <parent link="base_link" />
     <child link="seat_turn_over" />
-    <origin xyz="0 0 0" rpy="0 0 0" />
+    <origin xyz="0 0 0.004" rpy="0 0 0" />
   </joint>
   <!-- The fixed seat of the plate at the standard coordinate (y = 0.71 m: block 124 x 80 mm with the boss the flange rests on, top z 1.052), cut out of lasermarker_v2.stl: its own link so that its collision is the exact shape (convexDecomposition) -->
   <link name="seat_standard">

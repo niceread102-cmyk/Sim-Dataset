@@ -1,3 +1,10 @@
+"""ee_6d.py: type a target, it goes out on /target_pose (geometry_msgs/Pose: TCP in the world frame) to ik_node.py or robot_sequence.py.
+
+    python3 control/ee_6d.py [robot:=<name>] [map:=<map>] [id:=<ROS domain id>]
+
+Input: x y z [roll pitch yaw | qx qy qz qw] [standard | turn over], or `lens x y z [yaw]` = the TCP that puts the wrist camera lens there.
+id:= sends to the robot of the map with that ROS domain id.
+"""
 import os
 import sys
 import time
@@ -11,17 +18,17 @@ from std_msgs.msg import String
 from scipy.spatial.transform import Rotation
 
 DEFAULT_RPY = (180.0, 0.0, 0.0)
-SIM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # Simulation/
+SIM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(SIM, 'isaacsim'))
-import sim_config  # noqa: E402  the maps and robots of isaacsim/configs/
+import sim_config
 
 
-def lens_calibration(robot=None, map_name=None):
-    """(flange -> lens 4 x 4, TCP offset in the flange frame) of the robot (robot:=, else scene.robot of the map:=): the pose of the link of wrist_camera
-    (configs/robot/<robot>.yaml) in the end frame of its ik_node.yaml, read from the URDF (a real robot: its hand-eye calibration), and the TCP offset of that ik_node.yaml"""
+def lens_calibration(robot=None, map_name=None, id=None):
     import make_robot_config as mrc
-    robot, map_name = sim_config.with_current(robot, map_name)              # without robot:= / map:= the ones of the running robot_sim.py
-    robot = sim_config.pick_robot(robot, sim_config.scene_of(map_name))
+    robot, map_name = sim_config.with_current(robot, map_name)
+    if id is not None:
+        robot = sim_config.option(sys.argv[1:], 'robot')
+    robot = sim_config.robot_entry(sim_config.scene_of(map_name), robot, id)["name"]
     ry = sim_config.load_robot(robot)
     ik = yaml.safe_load(open(os.path.join(sim_config.BRINGUP_DIR, robot, 'config', 'ik_node.yaml')))
     T = mrc.Urdf(mrc.find_urdf(robot)).relative_pose(ik['ee_link'], ry['wrist_camera']['link'])
@@ -31,11 +38,9 @@ def lens_calibration(robot=None, map_name=None):
 
 
 def lens_to_tcp(x, y, z, yaw, cal):
-    """TCP pose (position, flange rotation) that puts the lens at (x, y, z) m, looking straight down, the image x axis turned by yaw deg about the
-    vertical from the world +x (yaw = the angle of a crate: its long side along the image x axis)"""
     T_ee_lens, tcp = cal
     T_lens = np.eye(4)
-    T_lens[:3, :3] = Rotation.from_euler('Z', yaw, degrees=True).as_matrix() @ np.diag([1.0, -1.0, -1.0])    # optical z down, y down in the image
+    T_lens[:3, :3] = Rotation.from_euler('Z', yaw, degrees=True).as_matrix() @ np.diag([1.0, -1.0, -1.0])
     T_lens[:3, 3] = [x, y, z]
     T_ee = T_lens @ np.linalg.inv(T_ee_lens)
     return T_ee[:3, 3] + T_ee[:3, :3] @ tcp, Rotation.from_matrix(T_ee[:3, :3])
@@ -44,11 +49,11 @@ class TargetPublisher(Node):
     def __init__(self):
         super().__init__('target_publisher')
         self.target_pub = self.create_publisher(Pose, '/target_pose', 10)
-        self.variant_pub = self.create_publisher(String, '/place_variant', 10)    # state of the part for robot_sequence.py: standard | turn_over
+        self.variant_pub = self.create_publisher(String, '/place_variant', 10)
 
     def publish_variant(self, variant):
         self.variant_pub.publish(String(data=variant))
-        time.sleep(0.05)    # before the pose, so that the sequence has it when the target comes
+        time.sleep(0.05)
 
     def publish_target(self, x, y, z, roll=None, pitch=None, yaw=None):
         if roll is None:
@@ -59,9 +64,8 @@ class TargetPublisher(Node):
         msg.position.y = y
         msg.position.z = z
 
-        # r = Rotation.from_euler('xyz', [roll, pitch, yaw], degrees=True) # extrinsic
-        r = Rotation.from_euler('XYZ', [roll, pitch, yaw], degrees=True) # intrinsic        
-        q = r.as_quat()  # [x, y, z, w]
+        r = Rotation.from_euler('XYZ', [roll, pitch, yaw], degrees=True)
+        q = r.as_quat()
         msg.orientation.x = q[0]
         msg.orientation.y = q[1]
         msg.orientation.z = q[2]
@@ -98,10 +102,13 @@ def is_number(text):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    id = sim_config.option(sys.argv[1:], 'id')
+    rclpy.init(args=args, **({} if id is None else {'domain_id': int(id)}))
+    if id is not None:
+        print(f"ROS domain {int(id)}: the robot of the launch with id:={id}")
     node = TargetPublisher()
-    robot, map_name = sim_config.option(sys.argv[1:], 'robot'), sim_config.option(sys.argv[1:], 'map')    # python3 ee_6d.py [robot:=<name>] [map:=<map>] (default: scene.robot of the map)
-    cal = None    # the lens calibration is read at the first `lens` command (robots without a wrist camera need none)
+    robot, map_name = sim_config.option(sys.argv[1:], 'robot'), sim_config.option(sys.argv[1:], 'map')
+    cal = None
 
     try:
         while rclpy.ok():
@@ -109,11 +116,11 @@ def main(args=None):
 
             if user_input.lower() == 'q':
                 break
-            if user_input.lower().startswith('lens'):    # the lens of the wrist camera over (x, y, z), turned by yaw: the scan pose of a crate
+            if user_input.lower().startswith('lens'):
                 try:
                     x, y, z, *rest = map(float, user_input.split()[1:])
                     if cal is None:
-                        cal = lens_calibration(robot, map_name)
+                        cal = lens_calibration(robot, map_name, id)
                         print(f"lens calibration (flange -> lens): xyz {np.round(cal[0][:3, 3], 4).tolist()} m, TCP offset {cal[1].tolist()} m")
                     pos, r = lens_to_tcp(x, y, z, rest[0] if rest else 0.0, cal)
                 except (ValueError, RuntimeError, KeyError, TypeError) as e:
@@ -126,10 +133,10 @@ def main(args=None):
 
             values = user_input.split()
             n = next((i for i, v in enumerate(values) if not is_number(v)), len(values))
-            variant = ' '.join(values[n:]).lower().replace(' ', '_')   # a word after the numbers: the state of the part (standard | turn over), optional
+            variant = ' '.join(values[n:]).lower().replace(' ', '_')
             values = values[:n]
             try:
-                if len(values) in (3, 6, 7) and variant:    # without it a sequence with `target: object` decides it from the pose of the part
+                if len(values) in (3, 6, 7) and variant:
                     node.publish_variant(variant)
                 if len(values) == 3:
                     x, y, z = map(float, values)

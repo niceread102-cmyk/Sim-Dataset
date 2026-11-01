@@ -1,0 +1,111 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="pump_cover_pnp">
+  <!--Meters. The CAD of the PNP of the pump cover layout (one mesh in PUMP_COVER_MAP.usd) split into its solids, kept in the world frame of the map at zero joint positions (the head is down over the jigs 01, 02 of conveyor 1): frame (static), carriage with the cylinder housing (pnp_slide along the rail), head = the cylinder rods, plate and cups below the housing (pnp_z up into the housing, pnp_turn unused). The origin of each cup link is its suction tip.-->
+  <link name="pnp_base">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/frame.stl" scale="1 1 1" />
+      </geometry>
+      <material name="pnp_steel">
+        <color rgba="0.10 0.105 0.11 1" />
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="-1.64 -0.58 1.2" rpy="0 0 0" />
+      <mass value="100" />
+      <inertia ixx="30" iyy="30" izz="5" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="pnp_slide_link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/carriage.stl" scale="1 1 1" />
+      </geometry>
+      <material name="pnp_dark">
+        <color rgba="0.05 0.05 0.06 1" />
+      </material>
+    </visual>
+    <visual>
+      <geometry>
+        <mesh filename="meshes/housing.stl" scale="1 1 1" />
+      </geometry>
+      <material name="pnp_dark" />
+    </visual>
+    <inertial>
+      <origin xyz="-1.64 0.017 1.30" rpy="0 0 0" />
+      <mass value="2" />
+      <inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="pnp_z_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.3" />
+      <inertia ixx="0.003" iyy="0.003" izz="0.003" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="pnp_turn_link">
+    <visual>
+      <origin xyz="1.6395 -0.0100 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="meshes/head.stl" scale="1 1 1" />
+      </geometry>
+      <material name="pnp_head">
+        <color rgba="0.22 0.23 0.25 1" />
+      </material>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.5" />
+      <inertia ixx="0.01" iyy="0.01" izz="0.015" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="pnp_cup_1_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.05" />
+      <inertia ixx="0.0001" iyy="0.0001" izz="0.0001" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="pnp_cup_2_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.05" />
+      <inertia ixx="0.0001" iyy="0.0001" izz="0.0001" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <joint name="pnp_slide" type="prismatic">
+    <parent link="pnp_base" />
+    <child link="pnp_slide_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 1 0" />
+    <limit effort="2000" velocity="0.8" lower="-1.45" upper="0.05" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="pnp_z" type="prismatic">
+    <parent link="pnp_slide_link" />
+    <child link="pnp_z_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="2000" velocity="0.4" lower="0" upper="0.25" />
+    <dynamics damping="1.0" friction="0.0" />
+  </joint>
+  <joint name="pnp_turn" type="revolute">
+    <parent link="pnp_z_link" />
+    <child link="pnp_turn_link" />
+    <origin xyz="-1.6395 0.0100 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="1.5" lower="-0.2" upper="1.8" />
+    <dynamics damping="0.1" friction="0.0" />
+  </joint>
+  <joint name="pnp_cup_1_joint" type="fixed">
+    <parent link="pnp_turn_link" />
+    <child link="pnp_cup_1_link" />
+    <origin xyz="-0.1180 -0.0185 1.0830" rpy="0 0 0" />
+  </joint>
+  <joint name="pnp_cup_2_joint" type="fixed">
+    <parent link="pnp_turn_link" />
+    <child link="pnp_cup_2_link" />
+    <origin xyz="0.0820 -0.0185 1.0830" rpy="0 0 0" />
+  </joint>
+</robot>

@@ -1,12 +1,10 @@
-"""Rigid-transform helpers (numpy only). Quaternions are (w, x, y, z) everywhere in binsim;
-conversion to the simulator's order happens only in binsim/sim/compat.py."""
+"""Rigid-transform helpers (numpy only). Quaternions are (w, x, y, z) in binsim; the simulator's order is converted in binsim/sim/compat.py."""
 from __future__ import annotations
 
 import numpy as np
 
 
 def quat_to_mat(q: np.ndarray) -> np.ndarray:
-    """(..., 4) wxyz -> (..., 3, 3)."""
     q = np.asarray(q, dtype=np.float64)
     q = q / np.linalg.norm(q, axis=-1, keepdims=True)
     w, x, y, z = np.moveaxis(q, -1, 0)
@@ -19,7 +17,6 @@ def quat_to_mat(q: np.ndarray) -> np.ndarray:
 
 
 def mat_to_quat(R: np.ndarray) -> np.ndarray:
-    """(..., 3, 3) -> (..., 4) wxyz with w >= 0."""
     R = np.asarray(R, dtype=np.float64)
     shape = R.shape[:-2]
     R = R.reshape(-1, 3, 3)
@@ -56,7 +53,6 @@ def quat_mul(a, b):
 
 
 def rpy_to_mat(rpy_deg) -> np.ndarray:
-    """Extrinsic XYZ (roll about X, then pitch about Y, then yaw about Z): R = Rz @ Ry @ Rx."""
     r, p, y = np.deg2rad(np.asarray(rpy_deg, dtype=np.float64))
     cr, sr, cp, sp, cy, sy = np.cos(r), np.sin(r), np.cos(p), np.sin(p), np.cos(y), np.sin(y)
     Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
@@ -66,13 +62,12 @@ def rpy_to_mat(rpy_deg) -> np.ndarray:
 
 
 def mat_to_rpy(R) -> np.ndarray:
-    """Inverse of rpy_to_mat, degrees."""
     R = np.asarray(R, dtype=np.float64)
     pitch = np.arcsin(np.clip(-R[2, 0], -1.0, 1.0))
     if abs(np.cos(pitch)) > 1e-6:
         roll = np.arctan2(R[2, 1], R[2, 2])
         yaw = np.arctan2(R[1, 0], R[0, 0])
-    else:  # gimbal lock
+    else:
         roll = np.arctan2(-R[1, 2], R[1, 1])
         yaw = 0.0
     return np.rad2deg([roll, pitch, yaw])
@@ -108,7 +103,6 @@ def transform_points(T, pts) -> np.ndarray:
 
 
 def random_quaternions(n: int, rng: np.random.Generator) -> np.ndarray:
-    """n uniformly random rotations (Shoemake), wxyz. Ported from the legacy capture script."""
     u1, u2, u3 = rng.uniform(0.0, 1.0, size=(3, n))
     q = np.empty((n, 4), dtype=np.float64)
     q[:, 0] = np.sqrt(u1) * np.cos(2 * np.pi * u3)
@@ -119,16 +113,11 @@ def random_quaternions(n: int, rng: np.random.Generator) -> np.ndarray:
 
 
 def look_at_cv(eye, target, up_hint, roll_deg: float = 0.0) -> np.ndarray:
-    """Camera-to-world rotation in the OpenCV convention (x right, y down, z forward).
-
-    `up_hint` is the world direction that should appear "up" in the image. When looking straight
-    down, world +Z is degenerate, so pass a horizontal direction (e.g. the bin's long axis).
-    """
     eye, target, up = (np.asarray(v, dtype=np.float64) for v in (eye, target, up_hint))
     z = target - eye
     z /= np.linalg.norm(z)
     x = np.cross(z, up)
-    if np.linalg.norm(x) < 1e-6:  # up_hint parallel to the view axis: pick any perpendicular
+    if np.linalg.norm(x) < 1e-6:
         alt = np.array([1.0, 0, 0]) if abs(z[0]) < 0.9 else np.array([0, 1.0, 0])
         x = np.cross(z, alt)
     x /= np.linalg.norm(x)

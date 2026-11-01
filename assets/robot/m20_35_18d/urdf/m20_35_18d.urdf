@@ -152,6 +152,7 @@
     <parent link="base_link"/>
     <child link="J1_link"/>
     <axis xyz=" 0  0  1"/>
+    <!-- Joint range: -170 to 170 deg (URDF limit values are in rad). -->
     <limit effort="7000" lower="-2.9670597283903604" upper="2.9670597283903604" velocity="3.141592653589793"/>
   </joint>
   <joint name="J2" type="revolute">
@@ -159,6 +160,7 @@
     <parent link="J1_link"/>
     <child link="J2_link"/>
     <axis xyz=" 0  1  0"/>
+    <!-- Joint range: -100 to 160 deg (URDF limit values are in rad). -->
     <limit effort="9000" lower="-1.7453292519943295" upper="2.792526803190927" velocity="3.141592653589793"/>
   </joint>
   <joint name="J3" type="revolute">
@@ -166,6 +168,7 @@
     <parent link="J2_link"/>
     <child link="J3_link"/>
     <axis xyz=" 0 -1  0"/>
+    <!-- Joint range: -90 to 220 deg (URDF limit values are in rad). -->
     <limit effort="4000" lower="-1.5707963267948966" upper="3.839724354387525" velocity="3.490658503988659"/>
   </joint>
   <joint name="J4" type="revolute">
@@ -173,6 +176,7 @@
     <parent link="J3_link"/>
     <child link="J4_link"/>
     <axis xyz="-1  0  0"/>
+    <!-- Joint range: -200 to 200 deg (URDF limit values are in rad). -->
     <limit effort="600" lower="-3.490658503988659" upper="3.490658503988659" velocity="6.1086523819801535"/>
   </joint>
   <joint name="J5" type="revolute">
@@ -180,6 +184,7 @@
     <parent link="J4_link"/>
     <child link="J5_link"/>
     <axis xyz=" 0 -1  0"/>
+    <!-- Joint range: -179.999 to 179.999 deg (URDF limit values are in rad). -->
     <limit effort="500" lower="-3.141575200297273" upper="3.141575200297273" velocity="6.1086523819801535"/>
   </joint>
   <joint name="J6" type="revolute">
@@ -187,6 +192,7 @@
     <parent link="J5_link"/>
     <child link="J6_link"/>
     <axis xyz="-1  0  0"/>
+    <!-- Joint range: -450 to 450 deg (URDF limit values are in rad). -->
     <limit effort="300" lower="-7.853981633974483" upper="7.853981633974483" velocity="6.981317007977318"/>
   </joint>
   <!-- world coords -->

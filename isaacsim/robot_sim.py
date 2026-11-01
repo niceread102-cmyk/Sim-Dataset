@@ -1,62 +1,9 @@
-"""Robot from its URDF in Isaac Sim, controlled over ROS 2, in a map of its own or in an empty map.
+"""robot_sim.py: the robot (URDF) in Isaac Sim, controlled over ROS 2, in a map (configs/map/<map>.yaml) or an empty one.
 
-    lab robot_sim.py robot:=<name> [map:=<map>] [--name m20_35_18d] [--gripper none] [--force-convert] [--headless]
-    lab robot_sim.py map:=<map>                    (the robot of the map: its scene.robot)
-    lab robot_sim.py robot:=<name> obj:=<part> [obj:=<part> ...]   (objects of configs/object/<part>.yaml at the pos_m / rpy_deg of their yaml)
+    lab robot_sim.py [robot:=<name>] [map:=<map>] [obj:=<part> ...] [--gripper none] [--force-convert] [--headless] [--export-layout FILE.usd]
 
-The robot (robot:=<name>; a bare name works too, or robot:=configs/robot/<name>.yaml) is chosen by its config file: one yaml per robot in
-configs/robot/ (the URDF in ../assets/robot, controller, gripper, start pose, drive gains, speeds, joint limits), the same in every map. A name
-is found as configs/robot/<name>.yaml or as the config whose `name:` it is; robot:= wins over the robot of the map.
-The map (map:=<map>) is configs/map/<map>.yaml, a map of its own: everything that stands around the robot (`scene:` below) and where the robot
-stands in it (scene.robot_pose [x, y, z, roll, pitch, yaw], times pos_m / rpy_deg of the robot yaml, which are 0). Without map:= the robot stands
-at the origin of an empty map: the floor only. (configs/map/map.yaml is the config of the dataset generator, not a map.) sim_config.py finds the
-files; the launch (robot.launch.py map:=<map>) reads the same map, so start both with the same map:=.
-
-../assets/robot/<name>/urdf/<name>.urdf (the same file the MoveIt bringup uses) is converted to USD on the first
-run and cached in assets_cache/robot_<name>/ (converted again when the .urdf changes; --force-convert after changing
-only meshes). Meshes: relative to the URDF or package://<pkg>/meshes/... (searched in the URDF folder and every folder
-above it), so a URDF straight out of xacro works.
-A gripper that is part of the robot URDF (lite6) is driven by <gripper_topic> too: list its joints as `gripper_joints:` in the config.
-With a gripper (../assets/grippper/<gripper>/urdf/<gripper>.urdf, same layout) its root link (e.g. flange) is joined to the robot's
-link of that name first; the joined URDF and its USD are cached in assets_cache/robot_<name>_<gripper>/. Gripper joints
-are driven like the robot's (joint_pos, ROS commands); URDF <mimic> joints follow their leader joint.
-The `scene:` of the map:
-`objects:` drops rigid parts from configs/object/<part>.yaml (the dataset part configs: mesh, mass, collision, material;
-USD cached in assets_cache like the dataset pipeline) at pos_m (part center) / rpy_deg.
-`bin:` puts the dataset's bin (the `bin:` + `loading:` sections of the map, e.g. `defaults: [../object/bin]`) at pos_m / rpy_deg in the world and
-drops a pile of `pile.count` parts into it with the dataset's planner (`pile.seed: random` = a different random pile on every
-start, the seed is printed; a number = always the same pile); bin and parts are separate world-frame prims
-(/World/bin, /World/pile/<part>_NNN), so part poses are world coordinates.
-`basket:` an open box (floor + 4 walls, kinematic; the dataset's procedural bin, no STL) at pos_m (bottom centre) /
-rpy_deg in the world (/World/basket): only an object of the scene (control/robot_sequence.py does not read it).
-`map:` loads an environment made in the Isaac Sim GUI: ../assets/map/<name>.usd (or a path; null = none),
-every top-level prim of it except what the Kit stage saved around the scene (render settings, viewport cameras, light rig), as /World/map/<prim>, at the
-world origin. Its colliders (rigid / collision set in the GUI) are used as they are; `map_collision:` / `map_edits:` change parts of it.
-`platform:` a static box (pedestal) at pos_m (bottom centre) / rpy_deg, size_m [x, y, z] (/World/platform).
-A robot whose x y is on it stands on top: its z is measured from the top of the platform (robot.launch.py does the same).
-`pallets:` stacks crates (a USD, or a box of configs/object/<config>.yaml) on the pallets of the map, `layers` layers of a grid
-each, `parts_per_crate` random parts in every crate (binsim/pallets.py; 0 = empty crates, no `part:` needed), `physics:` per pallet and layer.
-The parts of the top `dynamic_layers` layers move (/World/pile/..), the rest only fills the crates.
-`machines:` puts articulated machines at pos_m / rpy_deg (the base_link) as /World/machines/<name>: configs/machine/<name>.yaml is the machine
-itself (URDF of assets/machine/, materials, collision, carriers, speeds, fixtures, hands, part_pose, attach), the map entry says where it stands
-(any key of the machine yaml there wins in that map); `replaces:` switches off the static copy of it in the map. Their joints follow /<name>/joint_command
-(sensor_msgs/JointState, name + position in rad / m, a few joints at a time are fine) at `speed` / `joint_speeds` x the URDF velocity limit and are
-published on /<name>/joint_states.
-Every /target_pose (geometry_msgs/Pose, the TCP = the centre of the part to pick) makes the part of the pile there (within 4 cm) as exact as a clicked one: CLICK_HULLS
-convex hulls and the stiff contact settings, so the gripper does not sink into its bore wall. Only one part has them at a time.
-`physics_hz` (default 60) is the physics step rate of the scene (the dataset generator uses 200: falling parts sink into each other less).
-Drives use `stiffness` / `damping` and the URDF <limit effort> as force limit (the real joint torque / gripper force).
-The robot starts at joint_pos and follows commands at `speed` x the URDF joint velocity limits (targets are moved
-towards the command a step per frame, no jumps); arrive_tolerance_rad / arrive_settle_frames / gripper_grace_frames / gripper_window_frames of
-the robot yaml change when a move or a gripper command counts as done (ARRIVE_TOL, SETTLE_FRAMES, GRIP_GRACE, GRIP_WINDOW below):
-  subscribes  <controller>/joint_trajectory          trajectory_msgs/JointTrajectory (last point)
-  action      <controller>/follow_joint_trajectory   control_msgs/FollowJointTrajectory (MoveIt "Execute")
-  subscribes  <gripper_topic> (with a gripper)       std_msgs/Float64: 0 = closed, 1 = open (in between: partly open)
-  publishes   /joint_states                          sensor_msgs/JointState (measured position, velocity)
-  subscribes  /wrist_camera/capture (with `wrist_camera:` in the robot yaml)   std_msgs/Empty: one RGB + depth frame of the camera on the robot
-              to wrist_camera.output_dir (camera/ layout of gdrnpp's camera_convert_data.py, which turns it into the BOP folder of infer.py).
-              wrist_camera.lens = the barrel distortion of the training-data camera: the saved images are the distorted ones, undistort_map.npy next to them
-Run it where ROS 2 is sourced. Separate from the dataset pipeline (own stage; touches no dataset config or output).
+ROS: FollowJointTrajectory of the controller + /joint_states, gripper command / result, vacuum command / result, wrist camera capture. The map brings the machines
+(laser marker, conveyor), pallets of crates with parts and cameras; a click on a part prints its pose and the TCP that grips it.
 """
 import argparse
 import importlib.util
@@ -72,13 +19,13 @@ from collections import deque
 
 import yaml
 
-REPO = os.path.dirname(os.path.abspath(__file__))  # Simulation/isaacsim: configs/, binsim/, assets_cache/
+REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
-import sim_config  # noqa: E402  the maps, robots and machines of configs/
+import sim_config
 
 ASSETS = sim_config.ASSETS
-MACHINES = sim_config.MACHINE_ASSETS    # Simulation/assets/machine/<name>/urdf/<name>.urdf (+ meshes): articulated machines of the scene
-GRIPPERS = sim_config.GRIPPER_ASSETS    # Simulation/assets/grippper/<gripper>/urdf/<gripper>.urdf (the folder is spelled like this on disk)
+MACHINES = sim_config.MACHINE_ASSETS
+GRIPPERS = sim_config.GRIPPER_ASSETS
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("options", nargs="*", metavar="robot:=<name> map:=<map>",
@@ -86,9 +33,11 @@ parser.add_argument("options", nargs="*", metavar="robot:=<name> map:=<map>",
                          "and `map:=SIDE_PLATE_MAP` (configs/map/<map>.yaml; without it: only the robot and the floor)")
 parser.add_argument("--name", help="robot name (default: name in the config)")
 parser.add_argument("--gripper", help="gripper name in ../assets/grippper/<gripper>/urdf/, none = no gripper (default: gripper in the config)")
+parser.add_argument("--export-layout", metavar="FILE.usd", help="build the scene of the map, save its layout (the map USD with map_edits, the pallets with their crates, the machines, platform, "
+                    "floor; no robot, no parts) as FILE.usd and exit")
 parser.add_argument("--force-convert", action="store_true", help="convert the URDF again even if the cache is current")
 
-from isaaclab.app import AppLauncher  # noqa: E402
+from isaaclab.app import AppLauncher
 
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -97,26 +46,24 @@ for _a in args.options:
     if _a.startswith("map:="):
         args.map = _a[len("map:="):]
     elif _a.startswith("obj:="):
-        args.objects.append(_a[len("obj:="):])               # an object on the command line, on top of the objects of the map
+        args.objects.append(_a[len("obj:="):])
     elif _a.startswith("robot:="):
         args.config = _a[len("robot:="):] or None
     elif _a not in ("robot", "map"):
-        args.config = _a                                     # a bare name is a robot
+        args.config = _a
 try:
-    MAP_FILE = sim_config.map_path(args.map)                 # configs/map/<map>.yaml; None = no map: the robot and the floor
-    MAP = sim_config.load_map(args.map)                      # the whole map (scene: and, for a bin, the dataset's bin: / loading:)
+    MAP_FILE = sim_config.map_path(args.map)
+    MAP = sim_config.load_map(args.map)
 except ValueError as e:
     sys.exit(str(e))
 
 
 def attach_gripper(robot_urdf, gripper_urdf, out):
-    """Robot URDF + gripper URDF joined at the gripper's root link (a robot link, e.g. flange) -> out. Mesh paths
-    become absolute (the joined file lives in assets_cache); rewritten only when the content changes."""
     robot, grip = ET.parse(robot_urdf).getroot(), ET.parse(gripper_urdf).getroot()
     for root, src in ((robot, robot_urdf), (grip, gripper_urdf)):
         for m in root.iter("mesh"):
             m.set("filename", sim_config.find_mesh(m.get("filename"), os.path.dirname(src)))
-    names = lambda r, tag: {e.get("name") for e in r.findall(tag)}  # noqa: E731
+    names = lambda r, tag: {e.get("name") for e in r.findall(tag)}
     children = {j.find("child").get("link") for j in grip.findall("joint")}
     mount = next(ln.get("name") for ln in grip.findall("link") if ln.get("name") not in children)
     if mount not in names(robot, "link"):
@@ -134,9 +81,6 @@ def attach_gripper(robot_urdf, gripper_urdf, out):
 
 
 def urdf_joints(urdf):
-    """(movable joints, mimic joints) of a URDF. Joints: name -> (type, lower, upper, max velocity, max effort; 0 = none in the URDF).
-    Mimic: joint -> (leader, multiplier, offset); the converter writes NewtonMimicAPI, which PhysX does not use, so the follower's
-    drive target is set from the leader's by the sim."""
     root = ET.parse(urdf).getroot()
     joints = {}
     for j in root.findall("joint"):
@@ -152,12 +96,10 @@ def urdf_joints(urdf):
 
 
 def missing_meshes(urdf):
-    """the mesh references of a URDF whose file is not there"""
     return [m.get("filename") for m in ET.parse(urdf).getroot().iter("mesh") if not sim_config.find_mesh(m.get("filename", ""), os.path.dirname(urdf))]
 
 
 def any_parts(counts):
-    """parts_per_crate: one number or the nested list [pallet][layer][row][col]: is there a part in any crate?"""
     return any(any_parts(c) for c in counts) if isinstance(counts, (list, tuple)) else bool(counts)
 
 
@@ -177,30 +119,27 @@ def load_settings(path, name, gripper, pose=None):
         miss = missing_meshes(u)
         if miss:
             sys.exit(f"{len(miss)} mesh(es) of {u} not found: {miss[:5]}")
-    s["model"] = "_".join([s["name"]] + ([s["gripper"]] if s["gripper"] else []))  # USD cache: assets_cache/robot_<model>
+    s["model"] = "_".join([s["name"]] + ([s["gripper"]] if s["gripper"] else []))
     s["urdf"] = (attach_gripper(*urdfs, os.path.join(REPO, "assets_cache", f"robot_{s['model']}", f"{s['model']}.urdf"))
                  if s["gripper"] else urdfs[0])
     s["joints"], s["mimic"] = urdf_joints(s["urdf"])
-    # gripper joints driven by <gripper_topic> (0..1 -> lower..upper); mimic followers come along via s["mimic"]. Either the joints of
-    # the separate gripper URDF, or `gripper_joints:` of the config for a gripper that is already part of the robot URDF (lite6)
     builtin = list(s.get("gripper_joints") or [])
     bad = [n for n in builtin if n not in s["joints"]]
     if bad:
         sys.exit(f"gripper_joints of {path} are not movable joints of {s['urdf']}: {bad}")
     s["gripper_joints"] = [n for n in (j.get("name") for j in ET.parse(urdfs[1]).getroot().findall("joint"))
                            if n in s["joints"] and n not in s["mimic"]] if s["gripper"] else builtin
-    # the gripper's own links (all but its root, which is the robot's flange): gripper_material is applied to them
     g_root = ET.parse(urdfs[1]).getroot() if s["gripper"] else None
     s["gripper_links"] = [ln.get("name") for ln in g_root.findall("link")
                           if ln.get("name") in {j.find("child").get("link") for j in g_root.findall("joint")}] if s["gripper"] else []
-    # settling checks of the arm and of its gripper (module constants, set in main())
     s["sim_consts"] = {k: t(s[key]) for k, key, t in (("ARRIVE_TOL", "arrive_tolerance_rad", float), ("SETTLE_FRAMES", "arrive_settle_frames", int),
-                                                        ("GRIP_GRACE", "gripper_grace_frames", int), ("GRIP_WINDOW", "gripper_window_frames", int)) if s.get(key) is not None}
-    from binsim.config import _load_yaml_tree  # the same loader as the dataset's part files
+                                                        ("GRIP_GRACE", "gripper_grace_frames", int), ("GRIP_WINDOW", "gripper_window_frames", int),
+                                                        ("ACCEL_S", "accel_s", float)) if s.get(key) is not None}
+    from binsim.config import _load_yaml_tree
     scene = MAP.get("scene") or {}
-    s["pos_m"], s["rpy_deg"] = sim_config.robot_pose(s, scene if pose is None else {**scene, "robot_pose": pose})   # where the robot base stands in the map: its pose there x pos_m / rpy_deg of the robot yaml (on the platform)
+    s["pos_m"], s["rpy_deg"] = sim_config.robot_pose(s, scene if pose is None else {**scene, "robot_pose": pose})
     objects = []
-    for o in list(scene.get("objects") or []) + [{"part": name} for name in args.objects]:   # obj:= of the command line: at the pose of its yaml
+    for o in list(scene.get("objects") or []) + [{"part": name} for name in args.objects]:
         f = os.path.join(sim_config.OBJECTS_DIR, f"{o['part']}.yaml")
         if not os.path.isfile(f):
             print(f"[WARN] object {o['part']} skipped: part config not found: {f}", flush=True)
@@ -209,15 +148,14 @@ def load_settings(path, name, gripper, pose=None):
         if not os.path.isfile(part.get("mesh") or ""):
             print(f"[WARN] object {o['part']} skipped: mesh of {f} not found: {part.get('mesh')}", flush=True)
             continue
-        objects.append({"pos_m": part.get("pos_m", [0, 0, 0]), "rpy_deg": part.get("rpy_deg", [0, 0, 0]), **o, "cfg": part})   # the map entry wins over the pose of the part yaml
+        objects.append({"pos_m": part.get("pos_m", [0, 0, 0]), "rpy_deg": part.get("rpy_deg", [0, 0, 0]), **o, "cfg": part})
     s["objects"] = objects
-    # bin + pile for picking tests: the dataset's bin and loading settings (sections of the map), placed in the world
     b, s["bin"] = scene.get("bin") or None, None
     if b and not (MAP.get("bin") and MAP.get("loading")):
         print(f"[WARN] bin skipped: scene.bin of {MAP_FILE} needs the dataset's `bin:` (e.g. defaults: [../object/bin]) and `loading:` sections in the map", flush=True)
     elif b:
         pile = b.get("pile") or {}
-        seed = pile.get("seed", "random")  # "random" / null: a new pile on every start (printed below), a number: always the same pile
+        seed = pile.get("seed", "random")
         seed = int.from_bytes(os.urandom(4), "big") if seed is None or str(seed).lower() == "random" else int(seed)
         part, count = None, int(pile.get("count", 0))
         if pile.get("part"):
@@ -230,21 +168,24 @@ def load_settings(path, name, gripper, pose=None):
         s["bin"] = {"cfg": MAP["bin"], "loading": MAP["loading"], "pos_m": b.get("pos_m", [0, 0, 0]),
                     "rpy_deg": b.get("rpy_deg", [0, 0, 0]), "part": part, "count": count,
                     "seed": seed}
-    choice = scene.get("map")                       # an environment made in the GUI: a USD
+    choice = scene.get("map")
     s["map"] = None if not choice or str(choice).lower() in ("none", "null") else map_file(str(choice))
-    s["platform"] = pf = scene.get("platform") or None   # pedestal: a static box in the world (the robot on it: sim_config.robot_pose)
+    s["platform"] = pf = scene.get("platform") or None
     if pf and not pf.get("size_m"):
         print(f"[WARN] platform skipped: platform of {MAP_FILE} (scene:) needs size_m [x, y, z]", flush=True)
         s["platform"] = None
     s["map_edits"] = scene.get("map_edits") or []
     s["map_collision"] = scene.get("map_collision") or []
-    s["pallets"] = pc = scene.get("pallets") or None   # crates of parts stacked on the pallets of the map (binsim/pallets.py)
+    s["map_materials"] = scene.get("map_materials") or []
+    s["props"] = scene.get("props") or []
+    s["floor_color"] = scene.get("floor_color")
+    s["pallets"] = pc = scene.get("pallets") or None
     if pc:
         try:
             from binsim.pallets import DEFAULTS as PALLET_DEFAULTS
             crate = dict(pc["crate"])
             usd = None
-            if crate.get("config"):                  # the crate is a box of configs/object/<config>.yaml (STL, like the bin): size, inner size, floor from there
+            if crate.get("config"):
                 bf = os.path.join(sim_config.OBJECTS_DIR, f"{crate['config']}.yaml")
                 if not os.path.isfile(bf):
                     raise FileNotFoundError(f"crate config not found: {bf}")
@@ -272,19 +213,19 @@ def load_settings(path, name, gripper, pose=None):
             pc["seed"] = int.from_bytes(os.urandom(4), "big") if seed is None or str(seed).lower() == "random" else int(seed)
             pc["crate"] = {**crate, "usd": usd}
             s["pallet_physics"] = {(int(pl_.get("pallet", 0)), int(ly.get("layer", 0))): (bool(ly.get("physics", True)), None if ly.get("crates") is None else {int(i) for i in ly["crates"]}, bool(ly.get("switch")))
-                                   for pl_ in (pc.get("physics") or []) if isinstance(pl_, dict) for ly in (pl_.get("layers") or []) if isinstance(ly, dict)}   # physics true / false per pallet and layer (0 = bottom)
-        except Exception as e:  # noqa: BLE001
+                                   for pl_ in (pc.get("physics") or []) if isinstance(pl_, dict) for ly in (pl_.get("layers") or []) if isinstance(ly, dict)}
+        except Exception as e:
             print(f"[WARN] pallets skipped: {type(e).__name__}: {e}", flush=True)
             s["pallets"] = None
-    s["basket"] = k = scene.get("basket") or None  # open box to release the part into: a procedural bin in the world
+    s["basket"] = k = scene.get("basket") or None
     if k and any(key not in k for key in ("pos_m", "size_m", "wall_thickness_m")):
         print(f"[WARN] basket skipped: basket of {MAP_FILE} (scene:) needs pos_m, size_m and wall_thickness_m", flush=True)
         s["basket"] = None
-    s["cameras"] = [dict(c) for c in scene.get("cameras") or []]   # fixed 2D cameras of the map (make_fixed_camera): a picture on /<name>/capture
-    s["machines"] = []                             # articulated machines standing in the map: configs/machine/<name>.yaml + where the map puts it
+    s["cameras"] = [dict(c) for c in scene.get("cameras") or []]
+    s["machines"] = []
     for entry in scene.get("machines") or []:
         m = sim_config.machine_config(entry)
-        urdf = (os.path.join(MACHINES, str(m["urdf"])) if m.get("urdf")      # `urdf:` = a path below assets/machine/ (a folder or file that is not named like the machine)
+        urdf = (os.path.join(MACHINES, str(m["urdf"])) if m.get("urdf")
                 else os.path.join(MACHINES, str(m.get("name")), "urdf", f"{m.get('name')}.urdf"))
         if not os.path.isfile(urdf):
             print(f"[WARN] machine {m.get('name')} skipped: URDF not found: {urdf}", flush=True)
@@ -300,7 +241,6 @@ def load_settings(path, name, gripper, pose=None):
 
 
 def map_file(choice):
-    """USD of the map: a file path, or a name = ../assets/map/<name>.usd (.usda, .usdc)"""
     if os.path.isfile(choice):
         return os.path.abspath(choice)
     d = os.path.join(ASSETS, "map")
@@ -311,120 +251,111 @@ def map_file(choice):
     sys.exit(f"map USD not found: {choice}; USDs in {d}: {', '.join(names) or '-'}")
 
 
-try:                                               # robot:= on the command line = that robot alone, else the robots of the map (scene.robots: each with its ROS domain di)
+try:
     ENTRIES = sim_config.scene_robots(MAP.get("scene") or {}, args.config)
     CONFIGS = [sim_config.robot_config_path(e["name"]) for e in ENTRIES]
 except ValueError as e:
     sys.exit(str(e))
 print(f"[INFO] map: {os.path.relpath(MAP_FILE, REPO) if MAP_FILE else 'none (the robot and the floor)'}; robots: "
-      + ", ".join(f"{os.path.relpath(c, REPO)} (di {e['di'] if e['di'] is not None else 'of the environment'}, pose {e['pose']})" for e, c in zip(ENTRIES, CONFIGS)), flush=True)
-robots = []                                        # checked before Isaac Sim starts
+      + ", ".join(f"{os.path.relpath(c, REPO)} (id {e['id'] if e['id'] is not None else 'of the environment'}, pose {e['pose']})" for e, c in zip(ENTRIES, CONFIGS)), flush=True)
+robots = []
 for _i, (_e, _c) in enumerate(zip(ENTRIES, CONFIGS)):
     _r = load_settings(os.path.abspath(_c), args.name, args.gripper, _e["pose"])
-    _r["di"], _r["prim"] = _e["di"], "/World/robot" if len(ENTRIES) == 1 else f"/World/robot_{_i}"
+    _r["id"], _r["prim"] = _e["id"], "/World/robot" if len(ENTRIES) == 1 else f"/World/robot_{_i}"
     robots.append(_r)
-robot = robots[0]                                  # the scene of the map (machines, pallets, objects, ...) comes with the first robot
-sim_config.write_current([{"name": r["name"], "di": r["di"]} for r in robots],                 # the launch and the tools started without robot:= / map:= follow this
+robot = robots[0]
+sim_config.write_current([{"name": r["name"], "id": r["id"]} for r in robots],
                          os.path.splitext(os.path.basename(MAP_FILE))[0] if MAP_FILE else None)
 if importlib.util.find_spec("rclpy") is None:
     sys.exit("rclpy not found: source ROS 2 first (source /opt/ros/jazzy/setup.bash)")
 args.experience = args.experience or os.path.expanduser(
-    "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.full.kit")  # same kit as generate_isaacsim.py
+    "~/IsaacSim/_build/linux-aarch64/release/apps/isaacsim.exp.base.kit")
 if not args.headless:
     args.visualizer = args.visualizer or ["kit"]
 simulation_app = AppLauncher(args).app
 
-import numpy as np  # noqa: E402
-import omni.timeline  # noqa: E402
-import omni.ui as ui  # noqa: E402
-import omni.usd  # noqa: E402
-import rclpy  # noqa: E402
-from control_msgs.action import FollowJointTrajectory  # noqa: E402
-from isaacsim.core.experimental.prims import Articulation, RigidPrim  # noqa: E402
-from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt  # noqa: E402
-from rclpy.action import ActionServer, CancelResponse, GoalResponse  # noqa: E402
-from rclpy.callback_groups import ReentrantCallbackGroup  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
-from rclpy.node import Node  # noqa: E402
-from geometry_msgs.msg import Pose  # noqa: E402
-from sensor_msgs.msg import JointState  # noqa: E402
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
-from std_msgs.msg import Bool, Empty, Float64, Int32, String  # noqa: E402
-from trajectory_msgs.msg import JointTrajectory  # noqa: E402
+import numpy as np
+import omni.timeline
+import omni.ui as ui
+import omni.usd
+import rclpy
+from control_msgs.action import FollowJointTrajectory
+from isaacsim.core.experimental.prims import Articulation, RigidPrim
+from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics, UsdShade, Vt
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from geometry_msgs.msg import Pose
+from sensor_msgs.msg import JointState
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, Empty, Float64, Int32, String
+from trajectory_msgs.msg import JointTrajectory
 
-from binsim.camera import Intrinsics  # noqa: E402
-from binsim.lens import LensWarp, lens_intrinsics, pixel_rays, render_intrinsics  # noqa: E402
-from binsim.transforms import make_T, mat_to_quat, quat_to_mat, rpy_to_mat  # noqa: E402
+from binsim.camera import Intrinsics
+from binsim.lens import LensWarp, lens_intrinsics, pixel_rays, render_intrinsics
+from binsim.transforms import make_T, mat_to_quat, quat_to_mat, rpy_to_mat
 sys.path.insert(0, os.path.join(os.path.dirname(REPO), "control"))
-import compute_grasp_tcp_pose as grasp_tcp  # noqa: E402  object pose -> the pose of the TCP that grips it (control/, also a script of its own)
+import compute_grasp_tcp_pose as grasp_tcp
 
-APP_HZ = 60.0  # physics steps per app.update() in the default physics scene (as in generate_isaacsim.py)
+APP_HZ = 60.0
 ROBOT_PATH = "/World/robot"
-# Nothing here waits for the clock: every limit counts physics frames (1 app update = 1/60 s of simulated time), so a slow sim
-# gives the same result as a fast one. A trajectory ends with the result of the action (MoveIt takes no new goal until then):
-# succeeded = the joints are within ARRIVE_TOL of the goal and no joint moved more than SETTLE_MOVE during SETTLE_FRAMES;
-# aborted = they stopped short of it (no joint moved more than STALL_MOVE for STALL_FRAMES, e.g. blocked by the bin).
-ARRIVE_TOL, STALL_MOVE, STALL_FRAMES, SETTLE_MOVE, SETTLE_FRAMES = 0.01, 0.01, 60, 0.0005, 18   # rad, rad, frames, rad, frames
-# A gripper command is answered on <gripper topic>/result (std_msgs/String): "reached" = the joint is within GRIP_TOL (m) of the
-# commanded position, "blocked" = it stopped short of it (no more than GRIP_TOL of travel during GRIP_WINDOW frames, counted
-# after GRIP_GRACE frames of start-up), e.g. the jaws pressing against the part.
-GRIP_TOL, GRIP_GRACE, GRIP_WINDOW = 0.0002, 18, 18   # m, frames, frames
-# The part that is clicked in the viewport gets this many convex hulls (every other part keeps the max_convex_hulls of its object yaml, 32):
-# only the part the fingers go into needs the exact shape of its bore, and ~900 parts with hundreds of hulls overflow the PhysX GPU buffers.
-# Drives of the machines (scene.machines): a small machine, not an arm. USD units: N*m/deg and N*m*s/deg (angular), N/m and N*s/m (linear).
-# The damping times the highest joint speed (the URDF speed limit x `speed` of the machine, 2: flip 1.2 rad/s = 69 deg/s, jaws 0.06 m/s) stays below the URDF effort
-# (flip: 2.5 x 69 deg/s = 172 < 300 N*m, jaws: 100 x 0.06 m/s = 6 < 100 N).
+ARRIVE_TOL, STALL_MOVE, STALL_FRAMES, SETTLE_MOVE, SETTLE_FRAMES = 0.01, 0.01, 60, 0.0005, 18
+ACCEL_S, RAMP_FLOOR = 0.0, 0.03
+GRIP_TOL, GRIP_GRACE, GRIP_WINDOW = 0.0002, 18, 18
 MACHINE_STIFFNESS = {"angular": 100.0, "linear": 5000.0}
 MACHINE_DAMPING = {"angular": 2.5, "linear": 100.0}
-# The joints of a machine speed up and slow down smoothly (the command is a velocity ramp, not a jump to full speed) and the command of a rotor never runs
-# further ahead of the measured angle than MACHINE_LEAD: a rotor that is held (a jaw on the plate, the conveyor) cannot wind up a big error and then shoot off.
-MACHINE_ACCEL = {"angular": 3.0, "linear": 0.5}   # rad/s^2, m/s^2
-MACHINE_LEAD = 0.08                               # rad
-CARRIER_ACCEL = 0.5                               # m/s^2: the belt starts and stops softly, so the plates on the carriers do not slide (friction 0.5 holds up to 4.9)
-# The part that is clicked is published as std_msgs/Bool on PART_TOPIC: True = turned over (the word `turn_over` of the line printed for ee_6d.py), False = standard.
-# Latched (transient local), so a control node that starts later still gets the last click. control/robot_sequence.py takes the place pose of the part from it.
+MACHINE_ACCEL = {"angular": 3.0, "linear": 0.5}
+MACHINE_LEAD = 0.08
+CARRIER_ACCEL = 0.5
 PART_TOPIC = "/part_turned_over"
-TARGET_RADIUS = 0.04   # m: the part of the pile this close to a /target_pose is the one the robot goes to pick
-STIFF_KEEP = 2                                    # how many of the parts that still lie where they were refined keep the stiff contact settings (solver 16 / CCD); a part the robot carried away (CARRIED_M) keeps them until it is removed on a jig (attach:)
-CORNER_TOL, CORNER_FRAMES = 0.015, 45            # rad, frames: how close the arm has to be to the corner of a path (a joint that sags more than this is let go after CORNER_FRAMES frames)
+TARGET_RADIUS = 0.04
+STIFF_KEEP = 2
+CORNER_TOL, CORNER_FRAMES = 0.015, 45
+NEAR_TOL = 0.03
 CLICK_HULLS = 1000
-CLICK_VOXELS = 3000000   # voxel resolution of the same collider (PhysX default 500000): the hulls follow the thin wall of the bore closely
+CLICK_VOXELS = 3000000
 HULLS_ATTR = "physxConvexDecompositionCollision:maxConvexHulls"
 VOXELS_ATTR, VOXELS_DEFAULT = "physxConvexDecompositionCollision:voxelResolution", 500000
 DECOMPOSITION_ATTRS = {"max_hulls": ("maxConvexHulls", "Int"), "voxel_resolution": ("voxelResolution", "Int"), "error_percentage": ("errorPercentage", "Float"),
-                       "min_thickness": ("minThickness", "Float"), "hull_vertex_limit": ("hullVertexLimit", "Int"), "shrink_wrap": ("shrinkWrap", "Bool")}   # option -> attribute of PhysxConvexDecompositionCollisionAPI
-# The clicked part (the one the fingers push against) also gets the stiff contact settings, so a finger pushing hard on the thin
-# hole wall does not sink through it. Every other part keeps the PhysX defaults: with ~120 free parts these cost far too much.
-CLICK_KEEP = 10                                   # how many clicked / targeted parts that still lie where they were refined keep the fine collider; the oldest beyond it go back to their own
-CARRIED_M = 0.05                                  # m: a refined part this far from where it lay when it was refined was carried by the robot (seat, belt, hands): it keeps the fine collider and the stiff
-                                                  # settings until it is removed on a jig (attach:). Taking them back from a plate resting on a seat re-cooked its collider around the pin and threw it off
+                       "min_thickness": ("minThickness", "Float"), "hull_vertex_limit": ("hullVertexLimit", "Int"), "shrink_wrap": ("shrinkWrap", "Bool")}
+CLICK_KEEP = 10
+CARRIED_M = 0.05
 CLICK_PHYSX = {"CreateSolverPositionIterationCountAttr": (16, 4), "CreateSolverVelocityIterationCountAttr": (2, 1),
-               "CreateEnableCCDAttr": (True, False), "CreateMaxDepenetrationVelocityAttr": (0.5, 3.0)}   # (clicked, default)
+               "CreateEnableCCDAttr": (True, False), "CreateMaxDepenetrationVelocityAttr": (0.5, 1.0)}
+PART_PHYSX = {"CreateLinearDampingAttr": 0.2, "CreateAngularDampingAttr": 2.0, "CreateSleepThresholdAttr": 0.01, "CreateStabilizationThresholdAttr": 0.005,
+              "CreateMaxDepenetrationVelocityAttr": 1.0}
+CONTACT_OFFSET_M, REST_OFFSET_M = 0.003, 0.0
 
 
 class RobotBridge(Node):
-    """Joint targets from ROS (topic or MoveIt action); the sim loop reads them and reports the measured state."""
 
     def __init__(self, names, q0, controller, mimic, gripper, gripper_topic, limits, context=None):
-        super().__init__("robot_sim", context=context)                 # context = the ROS domain of this robot (di)
+        super().__init__("robot_sim", context=context)
         self.names = list(names)
-        self._lo = [lo for lo, _ in limits]   # URDF position limits per joint: the measured angle is reported inside them (see report)
+        self._lo = [lo for lo, _ in limits]
         self._hi = [hi for _, hi in limits]
         self._idx = {n: i for i, n in enumerate(self.names)}
         self._mimic = {n: m for n, m in mimic.items() if n in self._idx and m[0] in self._idx}
-        self._gripper = {n: lim for n, lim in gripper.items() if n in self._idx}  # joint -> (closed, open) position
+        self._gripper = {n: lim for n, lim in gripper.items() if n in self._idx}
         if self._gripper:
             self.create_subscription(Float64, gripper_topic, self._on_gripper, 10)
+        self.slow = False
+        self.create_subscription(Bool, "/motion/slow", lambda m: setattr(self, "slow", bool(m.data)), 10)
         self._lock = threading.Lock()
-        self._cond = threading.Condition(self._lock)   # notified by report() once per physics frame
-        self.frame = 0                                  # physics frames reported so far
+        self._cond = threading.Condition(self._lock)
+        self.frame = 0
         self._targets = list(q0)
         self._current = list(q0)
-        self._wps = deque()                             # waypoints of the running trajectory that the command has not passed yet
-        self._corner_frames = 0                         # frames the head waypoint (a corner of the path) has been waited for
-        self.events = deque(maxlen=40)                  # (time, text) of the last commands of the robot: the BOOM line (boom_step in the sim loop) shows the ones just before a plate is thrown
-        self._goal = None                               # the running trajectory (see _execute / _track_arm)
-        self._grip = None                               # the gripper command that has not been answered yet (see _track_gripper)
+        self._wps = deque()
+        self.grip_events = deque()
+        self._grip_v = None
+        self._hand = np.array([n in self._gripper or n in self._mimic for n in self.names])
+        self._share = 0.0
+        self._corner_frames = 0
+        self.events = deque(maxlen=40)
+        self._goal = None
+        self._grip = None
         self._grip_pub = self.create_publisher(String, f"{gripper_topic}/result", 10) if self._gripper else None
         self._part_pub = self.create_publisher(Bool, PART_TOPIC, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(JointTrajectory, f"{controller}/joint_trajectory", self._on_traj, 10)
@@ -433,19 +364,19 @@ class RobotBridge(Node):
             execute_callback=self._execute, goal_callback=lambda _: GoalResponse.ACCEPT,
             cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=ReentrantCallbackGroup())
         self._state_pub = self.create_publisher(JointState, "/joint_states", 10)
-        self.capture_requested = threading.Event()   # set by the topic, handled in the sim loop (Kit calls only on the main thread)
+        self.capture_requested = threading.Event()
         self.create_subscription(Empty, "/wrist_camera/capture", lambda _: self.capture_requested.set(), 10)
-        self.pictures = deque()                      # paths of the pictures of control/vision_pick.py (the sim loop shows the newest, PicturePanel)
+        self.pictures = deque()
         self.create_subscription(String, "/vision_pick/picture", lambda m: self.pictures.append(m.data), QoSProfile(
             depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.targets_seen = deque()                  # (x, y, z) of every /target_pose: the part there is handled like a clicked one (see refine_target in the sim loop)
+        self.targets_seen = deque()
         self.create_subscription(Pose, "/target_pose", lambda m: self.targets_seen.append((m.position.x, m.position.y, m.position.z)), 10)
 
     def _set(self, names, positions):
         with self._lock:
             self._apply(names, positions)
 
-    def _apply(self, names, positions):   # the caller holds the lock
+    def _apply(self, names, positions):
         for n, p in zip(names, positions):
             if n in self._idx:
                 self._targets[self._idx[n]] = float(p)
@@ -457,37 +388,45 @@ class RobotBridge(Node):
             self._set(msg.joint_names, msg.points[-1].positions)
 
     def publish_turned_over(self, flipped):
-        """the state of the clicked part: True = turned over, False = standard (PART_TOPIC)"""
         self._part_pub.publish(Bool(data=bool(flipped)))
+
+    def hold_gripper(self):
+        with self._lock:
+            self._apply(list(self._gripper), [self._current[self._idx[n]] for n in self._gripper])
+
+    def regrip(self):
+        if self._grip_v is not None:
+            with self._lock:
+                self._apply(list(self._gripper), [lo + self._grip_v * (hi - lo) for lo, hi in self._gripper.values()])
 
     def _on_gripper(self, msg):
         v = min(max(float(msg.data), 0.0), 1.0)
-        joint = next(iter(self._gripper))                                # the first joint tells when the gripper is done
+        joint = next(iter(self._gripper))
         lo, hi = self._gripper[joint]
         with self._lock:
             self._apply(list(self._gripper), [lo + v * (hi - lo) for lo, hi in self._gripper.values()])
-            self._grip = {"idx": self._idx[joint], "target": lo + v * (hi - lo), "frame": self.frame, "window": deque(maxlen=GRIP_WINDOW)}
+            self._grip = {"idx": self._idx[joint], "target": lo + v * (hi - lo), "frame": self.frame, "window": deque(maxlen=GRIP_WINDOW if v > 0.5 else max(GRIP_WINDOW, 45)), "v": v}
+            self._grip_v = v
+            self.grip_events.append(("command", v))
         self.events.append((time.time(), f"gripper command {v:.2f} ({'close' if v == 0 else 'open' if v == 1 else 'partly open'})"))
         self.get_logger().info(f"gripper {v:.2f} ({'closed' if v == 0 else 'open' if v == 1 else 'partly open'})")
 
     def _execute(self, goal):
-        """The waypoints are followed one after the other by the sim loop (see targets: the path shape, not a jump to the goal);
-        the goal ends with the result of the trajectory joints: arrived and at rest -> succeeded, stopped short of the goal -> aborted."""
         traj = goal.request.trajectory
         self.events.append((time.time(), f"trajectory of {len(traj.points)} waypoints"))
         if not traj.points:
             goal.abort()
             return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.INVALID_GOAL)
-        idx = [self._idx[n] for n in traj.joint_names if n in self._idx]   # only the joints of this trajectory (not the gripper)
+        idx = [self._idx[n] for n in traj.joint_names if n in self._idx]
         mine = {"idx": idx, "final": [p for n, p in zip(traj.joint_names, traj.points[-1].positions) if n in self._idx],
-                "window": deque(maxlen=SETTLE_FRAMES), "ref": None, "ref_frame": 0, "outcome": None}
+                "window": deque(maxlen=SETTLE_FRAMES), "ref": None, "ref_frame": 0, "outcome": None, "near": False}
         with self._cond:
             self._wps = deque((list(traj.joint_names), list(pt.positions)) for pt in traj.points)
             self._goal = mine
             while mine["outcome"] is None and self._goal is mine:
                 if goal.is_cancel_requested:
                     break
-                self._cond.wait(1.0)                       # woken by every frame; the timeout only re-checks for a cancel
+                self._cond.wait(1.0)
             if self._goal is mine:
                 self._goal = None
                 self._wps.clear()
@@ -495,7 +434,7 @@ class RobotBridge(Node):
             if goal.is_cancel_requested:
                 goal.canceled()
                 return FollowJointTrajectory.Result()
-            goal.abort()                                   # a newer trajectory took over
+            goal.abort()
             return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.INVALID_GOAL)
         if mine["outcome"] == "stalled":
             k = max(range(len(idx)), key=lambda i: mine["error"][i])
@@ -506,12 +445,15 @@ class RobotBridge(Node):
         goal.succeed()
         return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
 
-    def _track_arm(self, q):   # once per frame (report), the caller holds the lock
+    def _track_arm(self, q):
         g = self._goal
-        if g is None or g["outcome"] is not None or len(self._wps) > 1:    # only the last waypoint is waited for
+        if g is None or g["outcome"] is not None or len(self._wps) > 1:
             return
         pos = [q[i] for i in g["idx"]]
         error = [abs(p - f) for p, f in zip(pos, g["final"])]
+        if not g["near"] and max(error) < NEAR_TOL:
+            g["near"] = True
+            self.grip_events.append(("near", True))
         g["window"].append(pos)
         if g["ref"] is None or max(abs(a - b) for a, b in zip(pos, g["ref"])) > STALL_MOVE:
             g["ref"], g["ref_frame"] = pos, self.frame
@@ -521,7 +463,7 @@ class RobotBridge(Node):
         elif self.frame - g["ref_frame"] > STALL_FRAMES:
             g["outcome"], g["error"] = "stalled", error
 
-    def _track_gripper(self, q):   # once per frame (report), the caller holds the lock
+    def _track_gripper(self, q):
         g = self._grip
         if g is None:
             return
@@ -529,18 +471,42 @@ class RobotBridge(Node):
         g["window"].append(pos)
         if abs(pos - g["target"]) < GRIP_TOL:
             outcome = "reached"
-        elif (self.frame - g["frame"] > GRIP_GRACE + GRIP_WINDOW and len(g["window"]) == GRIP_WINDOW
+        elif (self.frame - g["frame"] > (GRIP_GRACE if g["v"] > 0.5 else max(GRIP_GRACE, 30)) + g["window"].maxlen and len(g["window"]) == g["window"].maxlen
               and max(g["window"]) - min(g["window"]) < GRIP_TOL):
             outcome = "blocked"
         else:
             return
         self._grip = None
+        self.grip_events.append(("done", g["v"], float(pos), outcome))
         self.get_logger().info(f"gripper {outcome}: position {pos:.4f} m (command {g['target']:.4f} m)")
         self._grip_pub.publish(String(data=outcome))
 
+    def limit(self, cmd, target, step):
+        delta = np.asarray(target, float) - cmd
+        out = np.clip(delta, -step, step)
+        arm = ~self._hand
+        k = max(1.0, float(np.max(np.abs(delta[arm]) / np.maximum(step[arm], 1e-12)))) if arm.any() else 1.0
+        out[arm] = delta[arm] / k
+        return cmd + out
+
+    def ramp(self, cmd, step):
+        if ACCEL_S <= 0:
+            return step
+        with self._lock:
+            if not self._wps:
+                self._share = 0.0
+                return step
+            wps, k = list(self._wps), 0
+            while k + 1 < len(wps) - 1 and wps[k + 1][1] != wps[k][1]:
+                k += 1
+            joints = [self._idx[n] for n in wps[0][0] if n in self._idx]
+            path = np.array([[p for n, p in zip(w[0], w[1]) if n in self._idx] for w in wps[:k + 2]])
+            left = np.abs(path[0] - np.array(cmd)[joints]) + np.abs(np.diff(path, axis=0)).sum(axis=0)
+            seconds = float(np.max(left / np.maximum(np.array(step)[joints] * APP_HZ, 1e-9)))
+            self._share = min(self._share + 1.0 / (ACCEL_S * APP_HZ), math.sqrt(2.0 * seconds / ACCEL_S), 1.0)
+            return step * max(self._share, RAMP_FLOOR)
+
     def targets(self, cmd=None, step=0.0):
-        """The joint targets. cmd = the rate-limited command of the sim loop, step = its largest move per frame: the waypoints of a
-        running trajectory that the command can reach within this frame are passed, so the command follows the path at full speed"""
         with self._lock:
             while self._wps:
                 names, pos = self._wps[0]
@@ -548,13 +514,15 @@ class RobotBridge(Node):
                 if cmd is None or len(self._wps) == 1:
                     break
                 joints = [self._idx[n] for n in names if n in self._idx]
-                if self._wps[1][1] == pos:                       # a repeated waypoint = a corner (robot_sequence.py, fuse_moves): the ARM has to be there, the command alone cutting the corner would
-                    err = np.abs(np.array(self._targets)[joints] - np.array(self._current)[joints])      # make a diagonal move into the bore
+                if self._wps[1][1] == pos:
+                    err = np.abs(np.array(self._targets)[joints] - np.array(self._current)[joints])
                     self._corner_frames += 1
                     if (err > CORNER_TOL).any() and self._corner_frames < CORNER_FRAMES:
                         break
                     self._corner_frames = 0
                     self._wps.popleft()
+                    last = not any(self._wps[i][1] == self._wps[i + 1][1] for i in range(len(self._wps) - 1))
+                    self.grip_events.append(("corner", last))
                     continue
                 if (np.abs(np.array(self._targets)[joints] - np.array(cmd)[joints]) > np.array(step)[joints]).any():
                     break
@@ -562,8 +530,6 @@ class RobotBridge(Node):
             return list(self._targets)
 
     def report(self, q, v):
-        # PhysX holds a joint at its limit with ~1e-6 rad of play, and MoveIt refuses a start state outside the URDF bounds
-        # (START_STATE_INVALID, 'Joint J1 ... outside bounds'): a joint resting on its limit is reported exactly on it
         q = [min(max(float(x), lo), hi) for x, lo, hi in zip(q, self._lo, self._hi)]
         with self._cond:
             self._current = [float(x) for x in q]
@@ -578,8 +544,6 @@ class RobotBridge(Node):
 
 
 def part_root(path):
-    """/World/pile/side_plate_078/geometry -> /World/pile/side_plate_078 (a part of the pile or a single object), or
-    /World/pallets/pallet_1/L0_C0_side_plate_01/geometry -> /World/pallets/pallet_1/L0_C0_side_plate_01 (a static part in a crate), else None"""
     p = path.split("/")
     if len(p) >= 4 and p[1] == "World" and p[2] in ("pile", "objects"):
         return "/".join(p[:4])
@@ -594,7 +558,6 @@ def update(n=1):
 
 
 def ghost_root(urdf):
-    """True if the URDF's root link is empty (e.g. `world`): the importer then fixes the robot to the world itself."""
     root = ET.parse(urdf).getroot()
     children = {j.find("child").get("link") for j in root.findall("joint")}
     for ln in root.findall("link"):
@@ -604,14 +567,12 @@ def ghost_root(urdf):
 
 
 def meshes_newer(urdf, usd_dir):
-    """True if a mesh file of the URDF changed after the cached USD was made (the converter only looks at the .urdf, not at its meshes)"""
     made = max((os.path.getmtime(os.path.join(d, f)) for d, _, fs in os.walk(usd_dir) for f in fs if f.endswith((".usd", ".usda"))), default=0.0)
     meshes = (sim_config.find_mesh(m.get("filename"), os.path.dirname(urdf)) for m in ET.parse(urdf).getroot().iter("mesh"))
     return any(p and os.path.getmtime(p) > made for p in meshes)
 
 
 def robot_usd(s, force):
-    """URDF -> USD, cached in assets_cache/robot_<model>/ (redone when the .urdf file or one of its meshes changes)."""
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     usd_dir = os.path.join(REPO, "assets_cache", f"robot_{s['model']}")
     if not force and meshes_newer(s["urdf"], usd_dir):
@@ -620,14 +581,145 @@ def robot_usd(s, force):
     conv = UrdfConverter(UrdfConverterCfg(
         asset_path=s["urdf"], usd_dir=usd_dir,
         fix_base=not ghost_root(s["urdf"]), merge_fixed_joints=False, force_usd_conversion=force,
-        collision_from_visuals="collision_type" in s, collision_type=str(s.get("collision_type", "Convex Hull"))))     # Convex Decomposition = the exact shape of the fingers
+        collision_from_visuals="collision_type" in s, collision_type=str(s.get("collision_type", "Convex Hull"))))
     return conv.usd_path
 
 
+def read_stl(path):
+    raw = open(path, "rb").read()
+    n = int(np.frombuffer(raw[80:84], "<u4")[0])
+    rec = np.frombuffer(raw[84:], dtype=[("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")], count=n)
+    return rec["v"].astype(np.float32), rec["n"].astype(np.float32)
+
+
+def urdf_chain(urdf):
+    root = ET.parse(urdf).getroot()
+    xyz = lambda e: [float(v) for v in (e.find("origin").get("xyz") or "0 0 0").split()] if e.find("origin") is not None else [0.0, 0.0, 0.0]
+    joints = []
+    for j in root.findall("joint"):
+        ax = j.find("axis")
+        joints.append({"name": j.get("name"), "type": j.get("type"), "parent": j.find("parent").get("link"), "child": j.find("child").get("link"),
+                       "xyz": xyz(j), "axis": [float(v) for v in ax.get("xyz").split()] if ax is not None else [1.0, 0.0, 0.0]})
+    colors, links = {}, {}
+    for ln in root.findall("link"):
+        vis = []
+        for v in ln.findall("visual"):
+            mesh, mat = v.find("geometry/mesh"), v.find("material")
+            if mesh is None:
+                continue
+            col = mat.find("color") if mat is not None else None
+            if col is not None:
+                colors[mat.get("name")] = [float(c) for c in col.get("rgba").split()]
+            vis.append({"file": mesh.get("filename"), "xyz": xyz(v), "material": mat.get("name") if mat is not None else None})
+        links[ln.get("name")] = vis
+    for vis in links.values():
+        for v in vis:
+            v["rgba"] = colors.get(v["material"], [0.5, 0.5, 0.5, 1.0])
+    return links, joints
+
+
+def kinematic_usd(s):
+    links, joints = urdf_chain(s["urdf"])
+    out_dir = os.path.join(REPO, "assets_cache", f"robot_{s['model']}")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{s['name']}_kinematic.usdc")
+    files = {v["file"]: sim_config.find_mesh(v["file"], os.path.dirname(s["urdf"])) for vis in links.values() for v in vis}
+    if os.path.isfile(path) and os.path.getmtime(path) > max([os.path.getmtime(s["urdf"])] + [os.path.getmtime(f) for f in files.values()]):
+        return path
+    stage = Usd.Stage.CreateNew(path)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    top = f"/{s['name']}"
+    UsdGeom.Xform.Define(stage, top)
+    stage.SetDefaultPrim(stage.GetPrimAtPath(top))
+    base = next(n for n in links if n not in {j["child"] for j in joints})
+    paths = {base: f"{top}/{base}"}
+    UsdGeom.Xform.Define(stage, paths[base])
+    for j in joints:
+        paths[j["child"]] = f"{paths[j['parent']]}/{j['child']}"
+        UsdGeom.Xform.Define(stage, paths[j["child"]]).AddTransformOp().Set(Gf.Matrix4d(1.0).SetTranslate(Gf.Vec3d(*j["xyz"])))
+    mats = {}
+
+    def material(rgba):
+        key = tuple(rgba[:3])
+        if key not in mats:
+            mp = f"{top}/Looks/m{len(mats)}"
+            mat, sh = UsdShade.Material.Define(stage, mp), UsdShade.Shader.Define(stage, mp + "/Shader")
+            sh.CreateIdAttr("UsdPreviewSurface")
+            sh.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*key))
+            sh.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.1)
+            sh.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.5)
+            mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
+            mats[key] = mat
+        return mats[key]
+    for name, vis in links.items():
+        for k, v in enumerate(vis):
+            UsdGeom.Xform.Define(stage, f"{paths[name]}/visual_{k}").AddTransformOp().Set(Gf.Matrix4d(1.0).SetTranslate(Gf.Vec3d(*v["xyz"])))
+            tri, nrm = read_stl(files[v["file"]])
+            mesh = UsdGeom.Mesh.Define(stage, f"{paths[name]}/visual_{k}/mesh")
+            mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(tri.reshape(-1, 3)))
+            mesh.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(np.full(len(tri), 3, np.int32)))
+            mesh.CreateFaceVertexIndicesAttr(Vt.IntArray.FromNumpy(np.arange(3 * len(tri), dtype=np.int32)))
+            mesh.CreateNormalsAttr(Vt.Vec3fArray.FromNumpy(np.repeat(nrm, 3, axis=0)))
+            mesh.SetNormalsInterpolation(UsdGeom.Tokens.faceVarying)
+            mesh.CreateSubdivisionSchemeAttr("none")
+            UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material(v["rgba"]))
+    stage.GetRootLayer().Save()
+    return path
+
+
+class NumpyBox:
+
+    def __init__(self, a):
+        self.a = a
+
+    def numpy(self):
+        return self.a
+
+
+class KinArticulation:
+
+    def __init__(self, m, root):
+        self.root = root
+        _, joints = urdf_chain(m["urdf"])
+        self.joints = [j for j in joints if j["type"] in ("prismatic", "revolute", "continuous")]
+        self.dof_names = [j["name"] for j in self.joints]
+        self.q = np.array([m["q0"].get(n, 0.0) for n in self.dof_names], float)
+        self.ops = None
+        self.shown = None
+
+    def apply(self):
+        if self.ops is None:
+            prims = {q.GetName(): q for q in Usd.PrimRange(omni.usd.get_context().get_stage().GetPrimAtPath(self.root))}
+            self.ops = [UsdGeom.Xformable(prims[j["child"]]).GetOrderedXformOps()[0] for j in self.joints]
+        for op, j, v in zip(self.ops, self.joints, self.q):
+            motion = Gf.Matrix4d(1.0)
+            if j["type"] == "prismatic":
+                motion.SetTranslate(Gf.Vec3d(*[a * float(v) for a in j["axis"]]))
+            else:
+                motion.SetRotate(Gf.Rotation(Gf.Vec3d(*j["axis"]), math.degrees(float(v))))
+            op.Set(motion * Gf.Matrix4d(1.0).SetTranslate(Gf.Vec3d(*j["xyz"])))
+        self.shown = self.q.copy()
+
+    def set_dof_position_targets(self, cmd):
+        self.q = np.array(cmd, float)
+        if self.shown is None or not np.array_equal(self.shown, self.q):
+            self.apply()
+
+    def set_dof_positions(self, *a, **k):
+        pass
+
+    def set_dof_velocities(self, *a, **k):
+        pass
+
+    def get_dof_positions(self):
+        return NumpyBox(self.q[None].copy())
+
+    def get_dof_velocities(self):
+        return NumpyBox(np.zeros((1, len(self.q))))
+
+
 def plan_pile(b, cache_dir):
-    """Bin USD and the pile's world poses: the dataset's planner (binsim.loading.plan_scene with the dataset's loading
-    settings) places b["count"] parts in the bin frame; each pose is moved to the world with the bin's pos_m / rpy_deg.
-    Returns (bin usd, [(part usd, world position, world rotation matrix), ...], loading mode)."""
     from binsim.assets import prepare_bin, prepare_part
     from binsim.loading import bin_geom_from_cfg, part_geoms_from_cfg, plan_scene
     bin_usd = prepare_bin(b["cfg"], cache_dir).usd_path
@@ -642,24 +734,21 @@ def plan_pile(b, cache_dir):
 
 
 def plan_pallet_crates(pc, cache_dir):
-    """Crates and parts of the pallets (binsim.pallets.plan_pallets): world poses + the USD of the part (None for empty crates: no `part:`)"""
     from binsim.assets import prepare_bin, prepare_part
     from binsim.pallets import plan_pallets
-    if pc["crate"].get("bin_cfg"):                   # a box made of an STL: its USD like the bin's
+    if pc["crate"].get("bin_cfg"):
         pc["crate"]["usd"] = prepare_bin(pc["crate"]["bin_cfg"], cache_dir).usd_path
     pa = prepare_part(pc["part_cfg"], cache_dir) if pc.get("part_cfg") else None
     cfg = {k: ({kk: vv for kk, vv in v.items() if kk != "bin_cfg"} if k == "crate" else v) for k, v in pc.items() if k not in ("part", "part_cfg", "seed", "physics")}
     if pa is None:
         cfg["parts_per_crate"] = 0
-    plan = plan_pallets(cfg, pa.extents if pa else [0.01, 0.01, 0.01], (pc.get("part_cfg") or {}).get("layer_rpy_deg"), np.random.default_rng(pc["seed"]))
+    plan = plan_pallets(cfg, pa.extents if pa else [0.01, 0.01, 0.01], (pc.get("part_cfg") or {}).get("layer_rpy_deg"), np.random.default_rng(pc["seed"]),
+                         pa.mesh.bounds.mean(axis=0) if pa else (0.0, 0.0, 0.0))
     plan["part_usd"] = pa.usd_path if pa else None
     return plan
 
 
 def wrist_lens(cfg):
-    """(intrinsics of the image, intrinsics of the pinhole render it is made from, LensWarp or None) of wrist_camera. With wrist_camera.lens
-    (the lens of the training-data camera, configs/camera/phoxi_1952x1460.yaml: barrel distortion, the "convex" look) the renderer, an ideal
-    pinhole camera, draws a bit more than the image and binsim/lens.py bends it into the image the real lens takes (like generate_isaacsim.py)."""
     if "_lens" not in cfg:
         w, h = (int(v) for v in cfg["resolution"])
         intr = Intrinsics(w, h, float(cfg["fx"]), float(cfg["fy"]), (w - 1) / 2.0, (h - 1) / 2.0)
@@ -673,9 +762,6 @@ def wrist_lens(cfg):
 
 
 def make_wrist_camera(stage, cfg, root=ROBOT_PATH):
-    """wrist_camera: a USD camera on the link `cfg.link` of the robot (an OpenCV optical frame: x right, y down, z forward), with the
-    intrinsics of cfg (resolution, fx, fy; centred principal point; the size of the pinhole render when there is a lens, see wrist_lens).
-    Returns the camera prim path, or None when the link is missing."""
     link = [p for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if p.GetName() == str(cfg["link"])]
     if not link:
         print(f"[WARN] wrist_camera skipped: no link {cfg['link']} in the robot (is it in the URDF?)", flush=True)
@@ -688,20 +774,18 @@ def make_wrist_camera(stage, cfg, root=ROBOT_PATH):
     cam.CreateHorizontalApertureAttr(float(w * focal / float(cfg["fx"])))
     cam.CreateVerticalApertureAttr(float(h * focal / float(cfg["fy"])))
     cam.CreateClippingRangeAttr(Gf.Vec2f(0.05, 10.0))
-    UsdGeom.Xformable(cam).AddOrientOp().Set(Gf.Quatf(0.0, 1.0, 0.0, 0.0))   # a USD camera looks along -z with y up: turned 180 deg about x it is the optical frame
+    UsdGeom.Xformable(cam).AddOrientOp().Set(Gf.Quatf(0.0, 1.0, 0.0, 0.0))
     return cam.GetPath().pathString
 
 
 def make_fixed_camera(stage, cfg):
-    """cameras: of the map: a fixed 2D camera at pos_m looking at look_at_m (world, m) with resolution [w, h] and a horizontal fov_deg, on a grey pole from the
-    floor (pole_m: its x y, default under the camera) - only to look at, no collider. Returns the camera prim path"""
     name = str(cfg["name"])
     pos, tgt = np.array(cfg["pos_m"], float), np.array(cfg["look_at_m"], float)
-    f = (tgt - pos) / np.linalg.norm(tgt - pos)                        # viewing direction
+    f = (tgt - pos) / np.linalg.norm(tgt - pos)
     r = np.cross(f, [0.0, 0.0, 1.0])
     r = r / np.linalg.norm(r) if np.linalg.norm(r) > 1e-6 else np.array([1.0, 0.0, 0.0])
     u = np.cross(r, f)
-    M = Gf.Matrix4d(*r, 0.0, *u, 0.0, *(-f), 0.0, *pos, 1.0)        # a USD camera looks along its -z with +y up (rows = its axes in the world)
+    M = Gf.Matrix4d(*r, 0.0, *u, 0.0, *(-f), 0.0, *pos, 1.0)
     root = f"/World/cameras/{name}"
     UsdGeom.Xform.Define(stage, "/World/cameras")
     xf = UsdGeom.Xform.Define(stage, root)
@@ -714,7 +798,7 @@ def make_fixed_camera(stage, cfg):
     cam.CreateVerticalApertureAttr(float(2.0 * focal * math.tan(math.radians(float(cfg.get("fov_deg", 40.0))) / 2.0) * h / w))
     cam.CreateClippingRangeAttr(Gf.Vec2f(0.02, 10.0))
     grey = [Gf.Vec3f(0.18, 0.19, 0.21)]
-    body = UsdGeom.Cube.Define(stage, f"{root}/body")                  # the housing, behind the lens (+z of the camera = backwards)
+    body = UsdGeom.Cube.Define(stage, f"{root}/body")
     body.CreateSizeAttr(1.0)
     body.CreateDisplayColorAttr(grey)
     bx = UsdGeom.Xformable(body)
@@ -732,7 +816,6 @@ def make_fixed_camera(stage, cfg):
 
 
 def capture_fixed_camera(cfg, cam_path):
-    """one RGB picture of a fixed camera (cameras: of the map) -> <output_dir>/<name>_<n>.png; the render product only exists for the picture"""
     import omni.replicator.core as rep
     from PIL import Image
     w, h = (int(v) for v in cfg.get("resolution", [1280, 960]))
@@ -744,7 +827,7 @@ def capture_fixed_camera(cfg, cam_path):
     try:
         update(int(cfg.get("warmup_frames", 8)))
         rgb = np.asarray(rgb_a.get_data())
-        for _ in range(60):                                   # the first frames of a new render product can be empty
+        for _ in range(60):
             if rgb.size:
                 break
             update(1)
@@ -761,9 +844,6 @@ def capture_fixed_camera(cfg, cam_path):
 
 
 def urdf_link_pose(urdf, link, q, base_T):
-    """World pose (4 x 4, m) of a URDF link: base_T (the pose of the URDF root in the world) times the chain of joint origins down to
-    `link`, revolute / prismatic joints at the positions q (dict joint name -> rad / m). Read from the URDF, not from the stage: what
-    the camera sees is the measured state of the joints."""
     root = ET.parse(urdf).getroot()
     parent = {j.find("child").get("link"): j for j in root.findall("joint")}
     chain, name = [], link
@@ -788,12 +868,6 @@ def urdf_link_pose(urdf, link, q, base_T):
 
 
 def capture_wrist_camera(cfg, cam_path, T_world_cam):
-    """One RGB + depth frame of the wrist camera in the `camera/` layout of gdrnpp's camera_convert_data.py (rgb/<n>.png, depth/<n>.png,
-    pose/<n>.json = T_world_cam, the pose of the optical frame in the Isaac world (m), camera.json), which its --to-bop turns into the BOP
-    folder infer.py reads. depth: uint16 in depth_scale mm, 0 = no depth (also outside
-    depth_range_m, like the PhoXi). With wrist_camera.lens the images are the distorted ones of the lens, like the raw captures of the real
-    PhoXi, and undistort_map.npy (the pinhole pixel of every image pixel, named in camera.json) is saved for --to-bop to undistort them.
-    The render product only exists for the capture, so the sim does not render the camera every frame."""
     import omni.replicator.core as rep
     from PIL import Image
     sensor, render, warp = wrist_lens(cfg)
@@ -803,7 +877,7 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
     os.makedirs(os.path.join(out, "depth"), exist_ok=True)
     os.makedirs(os.path.join(out, "pose"), exist_ok=True)
     cam_file = os.path.join(out, "camera.json")
-    if os.path.isfile(cam_file) and os.listdir(os.path.join(out, "rgb")):     # one camera.json (and one undistort map) serves all frames of the folder
+    if os.path.isfile(cam_file) and os.listdir(os.path.join(out, "rgb")):
         old = json.load(open(cam_file))
         if (("undistort_map" in old) != (warp is not None) or tuple(old.get("dist", ())) != tuple(sensor.dist)
                 or (old.get("width"), old.get("height"), old.get("fx"), old.get("fy")) != (w, h, float(cfg["fx"]), float(cfg["fy"]))):
@@ -817,7 +891,7 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
         for _ in range(int(cfg.get("warmup_frames", 8))):
             update(1)
         rgb, depth = np.asarray(rgb_a.get_data()), np.asarray(depth_a.get_data(), np.float32)
-        for _ in range(60):                                   # the first frames of a new render product can be empty
+        for _ in range(60):
             if rgb.size and depth.size:
                 break
             update(1)
@@ -832,7 +906,7 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
     lo, hi = (float(v) for v in cfg["depth_range_m"])
     depth = np.squeeze(depth)
     rgb = rgb[..., :3]
-    if warp is not None:                                   # the pinhole render -> the image of the lens (depth = z along the axis: nearest, no mixing)
+    if warp is not None:
         rgb, depth = warp.image(np.ascontiguousarray(rgb, np.uint8)), warp.labels(depth)
     depth = np.where(np.isfinite(depth) & (depth >= lo) & (depth <= hi), depth, 0.0)
     n = len([f for f in os.listdir(os.path.join(out, "rgb")) if f.endswith(".png")])
@@ -843,7 +917,7 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
     info = {"fx": float(cfg["fx"]), "fy": float(cfg["fy"]), "cx": (w - 1) / 2.0, "cy": (h - 1) / 2.0, "width": w, "height": h,
             "depth_scale": scale}
     map_file = os.path.join(out, "undistort_map.npy")
-    if warp is not None:                                   # K above = the pinhole the images are undistorted onto
+    if warp is not None:
         rays = pixel_rays(sensor)
         np.save(map_file, np.stack([rays[..., 0] * sensor.fx + sensor.cx, rays[..., 1] * sensor.fy + sensor.cy], -1).astype(np.float32))
         info.update(undistort_map="undistort_map.npy", dist=list(sensor.dist))
@@ -853,8 +927,6 @@ def capture_wrist_camera(cfg, cam_path, T_world_cam):
 
 
 def make_editable(roots):
-    """The instances below these prims are made editable (instanceable off, nested ones too: instanced mesh -> instanced material), only on this stage:
-    the cached USD is unchanged. The converter puts the meshes and materials of a URDF into instances, which cannot be changed otherwise."""
     while True:
         inst = [p for r in roots for p in Usd.PrimRange(r) if p.IsInstance()]
         if not inst:
@@ -863,8 +935,101 @@ def make_editable(roots):
             p.SetInstanceable(False)
 
 
+def solid_rules(lo, hi, rules):
+    dims, c, height = np.sort(hi - lo, axis=1), (lo + hi) / 2, hi[:, 2] - lo[:, 2]
+    pick = np.full(len(lo), -1)
+    for k, rule in enumerate(rules):
+        if rule.get("of") is not None:
+            continue
+        ok = pick < 0
+        if rule.get("region_m") is not None:
+            x0, x1, y0, y1 = (float(v) for v in rule["region_m"])
+            ok &= (c[:, 0] >= x0) & (c[:, 0] <= x1) & (c[:, 1] >= y0) & (c[:, 1] <= y1)
+        if rule.get("top_max_m") is not None:
+            ok &= hi[:, 2] <= float(rule["top_max_m"])
+        if rule.get("height_min_m") is not None:
+            ok &= height >= float(rule["height_min_m"])
+        if rule.get("dims_min_m") is not None:
+            ok &= (dims >= np.asarray(rule["dims_min_m"], float)).all(1)
+        if rule.get("dims_max_m") is not None:
+            ok &= (dims <= np.asarray(rule["dims_max_m"], float)).all(1)
+        pick[ok] = k
+    return pick
+
+
+def vacuum_tcp(qw, qx, qy, qz):
+    R = np.array([[1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+                  [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+                  [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)]]) @ np.diag([1.0, -1.0, -1.0])
+    return (math.degrees(math.atan2(-R[1, 2], R[2, 2])), math.degrees(math.asin(max(-1.0, min(1.0, R[0, 2])))), math.degrees(math.atan2(-R[0, 1], R[0, 0])),
+            1.0 - 2.0 * (qx * qx + qy * qy) < 0.0)
+
+
+def paint_material(stage, name, rule):
+    path = f"/World/map_looks/{name}"
+    if stage.GetPrimAtPath(path).IsValid():
+        return UsdShade.Material(stage.GetPrimAtPath(path))
+    mat = UsdShade.Material.Define(stage, path)
+    shader = UsdShade.Shader.Define(stage, f"{path}/surface")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*(float(c) for c in rule.get("color", [0.66, 0.67, 0.69]))))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(rule.get("metallic", 0.2)))
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(rule.get("roughness", 0.5)))
+    if rule.get("opacity") is not None:
+        shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(rule["opacity"]))
+    mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    return mat
+
+
+def paint_solids(stage, mesh_prim, rules, tag):
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    mesh = UsdGeom.Mesh(mesh_prim)
+    counts = np.asarray(mesh.GetFaceVertexCountsAttr().Get() or [])
+    if not len(counts) or (counts != 3).any():
+        print(f"[WARN] map_materials: {mesh_prim.GetPath()} is not a triangle mesh: not painted", flush=True)
+        return 0
+    M = np.array(UsdGeom.Xformable(mesh_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()), dtype=np.float64).T
+    W = np.asarray(mesh.GetPointsAttr().Get(), dtype=np.float64) @ M[:3, :3].T + M[:3, 3]
+    tri = np.asarray(mesh.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3)
+    q = np.round(W / 2e-4).astype(np.int64) + (1 << 20)
+    weld = np.unique((q[:, 0] << 42) | (q[:, 1] << 21) | q[:, 2], return_inverse=True)[1].ravel()[tri]
+    n = int(weld.max()) + 1
+    a, b = np.r_[weld[:, 0], weld[:, 1], weld[:, 2]], np.r_[weld[:, 1], weld[:, 2], weld[:, 0]]
+    solid = connected_components(coo_matrix((np.ones(len(a), np.int8), (a, b)), shape=(n, n)), directed=False)[1][weld[:, 0]]
+    T = W[tri]
+    order = np.argsort(solid, kind="stable")
+    cut = np.r_[0, np.flatnonzero(np.diff(solid[order])) + 1]
+    lo, hi = np.minimum.reduceat(T.min(1)[order], cut, axis=0), np.maximum.reduceat(T.max(1)[order], cut, axis=0)
+    pick = solid_rules(lo, hi, rules)[solid]
+    area = 0.5 * np.linalg.norm(np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]), axis=1)
+    for k, rule in enumerate(rules):
+        if rule.get("of") is not None:
+            parent = next(i for i, r in enumerate(rules) if r.get("name") == rule["of"])
+            inside = np.ones(len(pick), bool)
+            if rule.get("face_box_m") is not None:
+                x0, x1, y0, y1, z0, z1 = (float(v) for v in rule["face_box_m"])
+                c = T.mean(1)
+                inside = (c[:, 0] >= x0) & (c[:, 0] <= x1) & (c[:, 1] >= y0) & (c[:, 1] <= y1) & (c[:, 2] >= z0) & (c[:, 2] <= z1)
+            if rule.get("face_area_min_m2") is not None:
+                inside &= area >= float(rule["face_area_min_m2"])
+            if rule.get("face_size_max_m") is not None:
+                inside &= (T.max(1) - T.min(1)).max(1) <= float(rule["face_size_max_m"])
+            pick[(pick == parent) & inside & (area <= float(rule.get("face_area_max_m2", np.inf)))] = k
+    done = []
+    for k, rule in enumerate(rules):
+        faces = np.flatnonzero(pick == k)
+        if not len(faces):
+            continue
+        name = re.sub(r"\W", "_", f"paint_{tag}_{rule.get('name', k)}")
+        subset = UsdGeom.Subset.CreateGeomSubset(mesh, name, UsdGeom.Tokens.face, Vt.IntArray.FromNumpy(faces.astype(np.int32)), "materialBind", UsdGeom.Tokens.nonOverlapping)
+        UsdShade.MaterialBindingAPI.Apply(subset.GetPrim()).Bind(paint_material(stage, name, rule))
+        done.append(f"{rule.get('name', k)} {len(faces)}")
+    print(f"[INFO] map_materials: {mesh_prim.GetPath()}: {len(cut)} solid(s), faces painted: {', '.join(done) or 'none'}", flush=True)
+    return int((pick >= 0).sum())
+
+
 def apply_decomposition(prim, options=None):
-    """convexDecomposition collider on a mesh prim, with the options of DECOMPOSITION_ATTRS (max_hulls, voxel_resolution, error_percentage, ...)"""
     UsdPhysics.MeshCollisionAPI.Apply(prim).CreateApproximationAttr("convexDecomposition")
     prim.AddAppliedSchema("PhysxConvexDecompositionCollisionAPI")
     for key, value in (options or {}).items():
@@ -873,18 +1038,14 @@ def apply_decomposition(prim, options=None):
 
 
 def set_collision_decomposition(stage, patterns, root=ROBOT_PATH):
-    """collision_decomposition: link-name regexes of the robot yaml (or of a machine, below its prim `root`), or {regex: options} with the options of the
-    decomposition: a number = most convex hulls, or a mapping of DECOMPOSITION_ATTRS (max_hulls, voxel_resolution, error_percentage, ...; PhysX defaults:
-    32 hulls, 500000 voxels, 10 % error). The colliders under these links (the URDF collision meshes, which the converter
-    makes convexHull) become convexDecomposition, so the fingers keep their exact shape. Returns the number of colliders."""
     spec = dict(patterns) if isinstance(patterns, dict) else {q: None for q in patterns}
     rx = [(re.compile(str(q)), n) for q, n in spec.items()]
     roots = [(p, next(n for r, n in rx if r.fullmatch(p.GetName()))) for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if any(r.fullmatch(p.GetName()) for r, _ in rx)]
     make_editable([r for r, _ in roots])
-    done = set()                                  # the link roots are nested (gripper_mount contains gripper_motor, ...): every collider once
+    done = set()
     for r, spec_value in roots:
         options = {"max_hulls": spec_value} if isinstance(spec_value, (int, float)) and spec_value else dict(spec_value or {})
-        sdf = options.pop("sdf", None)               # {sdf: 512}: the exact shape of the mesh as a signed distance field (resolution along the longest side), not hulls: thin prongs and windows stay
+        sdf = options.pop("sdf", None)
         bad = [k for k in options if k not in DECOMPOSITION_ATTRS]
         if bad:
             sys.exit(f"collision_decomposition: unknown option {bad} (known: {', '.join(DECOMPOSITION_ATTRS)})")
@@ -900,11 +1061,31 @@ def set_collision_decomposition(stage, patterns, root=ROBOT_PATH):
     return len(done)
 
 
+def set_colliders(prim, on):
+    n = 0
+    for q in Usd.PrimRange(prim):
+        if q.HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(on)
+            n += 1
+    return n
+
+
+def set_collision_ccd(stage, patterns, root):
+    rx = [re.compile(str(q)) for q in patterns]
+    done = set()
+    for p in list(Usd.PrimRange(stage.GetPrimAtPath(root))):
+        if not any(r.fullmatch(p.GetName()) for r in rx):
+            continue
+        body = p
+        while body.IsValid() and not body.HasAPI(UsdPhysics.RigidBodyAPI):
+            body = body.GetParent()
+        if body.IsValid() and body.GetPath() not in done and str(body.GetPath()) != "/":
+            PhysxSchema.PhysxRigidBodyAPI.Apply(body).CreateEnableCCDAttr().Set(True)
+            done.add(body.GetPath())
+    return len(done)
+
+
 def set_collision_friction(stage, patterns, root, name="machine", override=None, combine="min"):
-    """collision_friction: {link-name regex: friction} below the prim `root` (a machine): the colliders of these links get a physics material with this friction
-    (static = dynamic) that wins over the one of the part touching them (friction combine mode `min`): 0.02 = oiled, a part slides down a sloped fixture.
-    combine "max" (a robot's fingertips): the higher one wins, a grip with more friction than the part's own
-    Set before the physics starts. Returns the number of colliders."""
     rx = [(re.compile(str(q)), float(f) if override is None else float(override), i) for i, (q, f) in enumerate(dict(patterns).items())]
     n, mats = 0, []
     for p in list(Usd.PrimRange(stage.GetPrimAtPath(root))):
@@ -912,7 +1093,7 @@ def set_collision_friction(stage, patterns, root, name="machine", override=None,
         if hit is None:
             continue
         f, i = hit
-        mat_path = f"/World/PhysicsMaterials/{name}_friction_{i}"                     # one material per machine and pattern: its friction can be changed while the simulation runs
+        mat_path = f"/World/PhysicsMaterials/{name}_friction_{i}"
         if mat_path not in mats:
             mats.append(mat_path)
         if not stage.GetPrimAtPath(mat_path).IsValid():
@@ -932,10 +1113,6 @@ def set_collision_friction(stage, patterns, root, name="machine", override=None,
 
 
 def set_materials(stage, root, rules):
-    """materials: [{links: [regex], color: [r, g, b], metallic, roughness}, ...] of a robot yaml / a machine yaml (gripper_material of the robot yaml = one rule
-    for the links of the gripper): the visual materials under the links whose prim name matches get that look (real metal: colour, metallic 1, a low
-    roughness = gloss). The converter turns the URDF colours into plastic-like materials (metallic 0, roughness 0.5). The rules are applied in order and a
-    link contains the links below it, so a rule for a link and then one for a part of it works. Returns the number of materials."""
     count = 0
     for rule in rules:
         rx = [re.compile(str(q)) for q in rule["links"]]
@@ -943,7 +1120,7 @@ def set_materials(stage, root, rules):
         make_editable(roots)
         mats = {UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial()[0].GetPath() for r in roots for p in Usd.PrimRange(r)
                 if p.IsA(UsdGeom.Gprim) and UsdGeom.Imageable(p).ComputePurpose() == UsdGeom.Tokens.default_}
-        mats.discard(Sdf.Path())                  # gprims without a material
+        mats.discard(Sdf.Path())
         for mp in mats:
             m = UsdShade.Material(stage.GetPrimAtPath(mp))
             if rule.get("color") is not None:
@@ -956,8 +1133,6 @@ def set_materials(stage, root, rules):
 
 
 class PicturePanel:
-    """A window of Isaac Sim with the last picture of control/vision_pick.py (all parts with their score ranking, the best one marked): the path of every new picture comes on
-    /vision_pick/picture. It is made when the first picture arrives and comes back if it was closed."""
 
     def __init__(self):
         self.window = None
@@ -978,9 +1153,6 @@ class PicturePanel:
 
 
 class MachineBridge(Node):
-    """Joint commands of one machine of the scene (scene.machines of the map) from ROS; the sim loop reads them and reports the measured state.
-    The topics of its machine yaml: hands.topic (the sim loop publishes which hand pairs have a part in front of them), part_pose.topic (the pose of
-    the part on its seat), trigger_topic with attach: (parts were put on its jigs: the sim loop removes them)."""
 
     def __init__(self, name, names, q0, limits, cfg=None, context=None):
         super().__init__(f"{name}_bridge", context=context)
@@ -995,10 +1167,15 @@ class MachineBridge(Node):
         cfg = cfg or {}
         self.hands_pub = self.create_publisher(Int32, str((cfg.get("hands") or {}).get("topic") or f"/{name}/hand_plates"), 10) if cfg.get("hands") else None
         self.part_pose_pub = self.create_publisher(Pose, str((cfg.get("part_pose") or {}).get("topic") or "/target_part_pose"), 10) if cfg.get("part_pose") else None
-        self.attach_requests = deque()               # trigger_topic: parts were put on the jigs (attach_step in the sim loop)
-        trigger = (cfg.get("attach") or {}).get("trigger_topic") or cfg.get("trigger_topic")   # attach.trigger_topic, else the trigger_topic of the machine
+        self.attach_requests = deque()
+        trigger = (cfg.get("attach") or {}).get("trigger_topic") or cfg.get("trigger_topic")
         if cfg.get("attach") and trigger:
             self.create_subscription(Empty, str(trigger), lambda _: self.attach_requests.append(time.time()), 10)
+        self.vacuum_req, self.vacuum_pub = deque(), None
+        if cfg.get("vacuum"):
+            vtopic = str(cfg["vacuum"].get("topic") or f"/{name}/vacuum")
+            self.create_subscription(Int32, vtopic, lambda m: self.vacuum_req.append(int(m.data)), 10)
+            self.vacuum_pub = self.create_publisher(Int32, vtopic + "/held", 10)
 
     def _on_command(self, msg):
         with self._lock:
@@ -1030,19 +1207,17 @@ class MachineBridge(Node):
 
 
 class CarrierBridge(Node):
-    """The carriers of a machine's belt (carriers: of its machine yaml) move in steps of one pitch, stop-and-go, and run round: what leaves at the -y end
-    of the loop comes back at the +y end. One topic controls it: std_msgs/Int32 on <topic>: n > 0 = advance n pitches (added to what is still to do),
-    0 = stop where it is. <topic>/moving (std_msgs/Bool, latched) is True while the carriers are moving. The sim loop calls step() once per frame."""
 
-    def __init__(self, name, topic, joints, slots, window, speed, accel=None, context=None):
+    def __init__(self, name, topic, joints, slots, window, speed, accel=None, context=None, reverse=False):
         super().__init__(f"{name}_carriers", context=context)
-        self.accel = float(accel) if accel else CARRIER_ACCEL    # m/s^2
+        self.sign = -1.0 if reverse else 1.0
+        self.accel = float(accel) if accel else CARRIER_ACCEL
         self.joints, self.slots, self.lo, self.hi = list(joints), [float(y) for y in slots], float(window[0]), float(window[1])
-        self.loop = self.hi - self.lo                       # length of the loop = number of carriers x pitch
+        self.loop = self.hi - self.lo
         self.pitch = self.loop / len(self.slots)
-        self.speed = float(speed)                           # m/s
-        self.v = 0.0                                        # m/s now
-        self.s = self.goal = 0.0                            # travelled (m, towards -y) and where it is going; multiples of the pitch = every carrier at a slot
+        self.speed = float(speed)
+        self.v = 0.0
+        self.s = self.goal = 0.0
         self.moving = False
         self._lock = threading.Lock()
         self.create_subscription(Int32, topic, self._on_command, 10)
@@ -1059,16 +1234,14 @@ class CarrierBridge(Node):
         self.get_logger().info(f"carriers: {'+%d pitch' % n if n > 0 else 'stop' if n == 0 else 'negative step ignored'}")
 
     def positions(self):
-        """joint positions (m, relative to their slots) of the carriers at the travelled distance s: every carrier stays inside the loop window"""
         with self._lock:
-            return [self.lo + (y - self.s - self.lo) % self.loop - y for y in self.slots]
+            return [self.lo + (y - self.sign * self.s - self.lo) % self.loop - y for y in self.slots]
 
     def step(self, dt):
-        """advance by dt s of simulated time towards the goal; returns the joint positions"""
         with self._lock:
             if self.s < self.goal:
-                v = min(self.speed, self.v + self.accel * dt, math.sqrt(2.0 * self.accel * (self.goal - self.s)))    # up to speed, and slow enough to stop at the goal
-                self.v = max(v, 0.01)                                                                                      # (a creep, so that the goal is reached)
+                v = min(self.speed, self.v + self.accel * dt, math.sqrt(2.0 * self.accel * (self.goal - self.s)))
+                self.v = max(v, 0.01)
                 self.s = min(self.goal, self.s + self.v * dt)
             else:
                 self.v = 0.0
@@ -1079,8 +1252,22 @@ class CarrierBridge(Node):
         return self.positions()
 
 
+def export_layout(robots, path):
+    stage = omni.usd.get_context().get_stage()
+    crate_frame = re.compile(r"L\d+_C\d+")
+    drop = [r["prim"] for r in robots] + ["/World/pile", "/World/objects"]
+    for pallet in stage.GetPrimAtPath("/World/pallets").GetChildren() if stage.GetPrimAtPath("/World/pallets").IsValid() else []:
+        drop += [str(c.GetPath()) for c in pallet.GetChildren() if not crate_frame.fullmatch(c.GetName())]
+    mats = stage.GetPrimAtPath("/World/PhysicsMaterials")
+    drop += [str(c.GetPath()) for c in (mats.GetChildren() if mats.IsValid() else []) if any(c.GetName().startswith(f"{r['name']}_robot_") for r in robots)]
+    for d in drop:
+        if stage.GetPrimAtPath(d).IsValid():
+            stage.RemovePrim(d)
+    stage.GetRootLayer().Export(path)
+    print(f"[INFO] layout saved: {path} ({len(drop)} prims left out: robot, its materials, parts)", flush=True)
+
+
 def build_stage(robots):
-    """the stage: the floor, the lights, every robot (its usd, q0 and prim) and the scene of the map (it comes with the first robot)"""
     s = robots[0]
     ctx = omni.usd.get_context()
     ctx.new_stage()
@@ -1093,26 +1280,23 @@ def build_stage(robots):
     scene = UsdPhysics.Scene.Define(stage, "/World/physicsScene")
     scene.CreateGravityDirectionAttr(Gf.Vec3f(0.0, 0.0, -1.0))
     scene.CreateGravityMagnitudeAttr(9.81)
-    # GPU contact buffers: with a pile (100 parts x 32 convex hulls) the default found/lost aggregate pair capacity is
-    # too small - PhysX: "increase ...foundLostAggregatePairsCapacity ..., otherwise the simulation will miss interactions"
     psa = PhysxSchema.PhysxSceneAPI.Apply(scene.GetPrim())
     psa.CreateGpuFoundLostAggregatePairsCapacityAttr().Set(2 ** 21)
     psa.CreateGpuTotalAggregatePairsCapacityAttr().Set(2 ** 21)
-    psa.CreateGpuMaxRigidPatchCountAttr().Set(2 ** 18)    # default 81920: the piles need ~90k contact patches while they settle ("Patch buffer overflow", contacts are dropped)
-    psa.CreateGpuMaxRigidContactCountAttr().Set(2 ** 21)  # default 524288 ("Contact buffer overflow ... at least 621121" crashed the GPU once)
-    psa.CreateGpuFoundLostPairsCapacityAttr().Set(2 ** 22)        # default 2^18: hundreds of hulls per fine plate, 26 SDF jigs
-    psa.CreateGpuHeapCapacityAttr().Set(2 ** 28)                  # default 64 MB
-    psa.CreateGpuTempBufferCapacityAttr().Set(2 ** 28)            # default 16 MB
-    psa.CreateGpuCollisionStackSizeAttr().Set(2 ** 29)   # the default 64 MB overflows with the pallets (~720 free parts, ~300 MB seen): PhysX drops contacts then
-    # physics rate (1 app update = 1/60 s of simulated time): at 60 Hz a part falling out of the pile column (up to 0.5 m, ~3 m/s)
-    # moves ~5 cm per step, more than the size of a plate, and can sink into the parts below. The dataset generator steps at 200 Hz
+    psa.CreateGpuMaxRigidPatchCountAttr().Set(2 ** 18)
+    psa.CreateGpuMaxRigidContactCountAttr().Set(2 ** 21)
+    psa.CreateGpuFoundLostPairsCapacityAttr().Set(2 ** 22)
+    psa.CreateGpuHeapCapacityAttr().Set(2 ** 28)
+    psa.CreateGpuTempBufferCapacityAttr().Set(2 ** 28)
+    psa.CreateEnableCCDAttr().Set(True)
+    psa.CreateGpuCollisionStackSizeAttr().Set(2 ** 29)
     scene.GetPrim().CreateAttribute("physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt).Set(int(s.get("physics_hz", 60)))
     floor = UsdGeom.Cube.Define(stage, "/World/floor")
     floor.CreateSizeAttr(1.0)
-    floor.CreateDisplayColorAttr([Gf.Vec3f(0.35, 0.35, 0.36)])
+    floor.CreateDisplayColorAttr([Gf.Vec3f(*(float(c) for c in (s.get("floor_color") or [0.35, 0.35, 0.36])))])
     fx = UsdGeom.Xformable(floor)
     fx.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, -0.01))
-    fx.AddScaleOp().Set(Gf.Vec3f(30.0, 30.0, 0.02))      # 30 x 30 m
+    fx.AddScaleOp().Set(Gf.Vec3f(30.0, 30.0, 0.02))
     UsdPhysics.CollisionAPI.Apply(floor.GetPrim())
     UsdLux.DomeLight.Define(stage, "/World/dome").CreateIntensityAttr(1000.0)
     sun = UsdLux.DistantLight.Define(stage, "/World/sun")
@@ -1135,13 +1319,13 @@ def build_stage(robots):
         place(f"/World/machines/{m['name']}", m["usd"], m.get("pos_m", [0, 0, 0]), m.get("rpy_deg", [0, 0, 0]))
     for i, o in enumerate(s["objects"]):
         place(f"/World/objects/{o['part']}_{i}", o["usd"], o.get("pos_m", [0, 0, 0]), o.get("rpy_deg", [0, 0, 0]))
-    if s.get("bin"):                              # bin and pile: separate prims, world poses (not under the bin)
+    if s.get("bin"):
         place("/World/bin", s["bin"]["usd"], s["bin"]["pos_m"], s["bin"]["rpy_deg"])
         for i, (usd, pos, R) in enumerate(s["bin"]["pile"]):
             place(f"/World/pile/{s['bin']['part']['name']}_{i:03d}", usd, pos, R=R)
-    if s.get("basket"):                           # basket: world pose, kinematic like the bin
+    if s.get("basket"):
         place("/World/basket", s["basket"]["usd"], s["basket"]["pos_m"], s["basket"].get("rpy_deg", [0, 0, 0]))
-    if s.get("pallets"):                          # crates of parts on the pallets: the crate USD keeps its own unit ops, so it hangs below a frame
+    if s.get("pallets"):
         pc, pl = s["pallets"], s["pallets"]["plan"]
         pname = (pc.get("part_cfg") or {}).get("name", "part")
         for c in pl["crates"]:
@@ -1149,14 +1333,11 @@ def build_stage(robots):
             place(frame, None, c["pos"], R=c["R"])
             crate = stage.DefinePrim(frame + "/crate")
             crate.GetReferences().AddReference(pc["crate"]["usd"])
-            crate.RemoveAPI(UsdPhysics.RigidBodyAPI)       # the crate is a rigid body in its file: here it stands still (a static triangle mesh)
-            if s.get("pallet_physics") and not c["dynamic"]:   # pallets.physics of the map: the crates of a layer with physics: false have no collider (not shown in the collision viewer, not cooked)
-                for q in Usd.PrimRange(crate):
-                    if q.HasAPI(UsdPhysics.CollisionAPI):
-                        UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-            # collision of the crate mesh: meshSimplification | convexHull | convexDecomposition | none (the triangle mesh of the file, default) | off (no collider at all: only to look at; yaml reads a bare `off` as False)
+            crate.RemoveAPI(UsdPhysics.RigidBodyAPI)
+            if s.get("pallet_physics") and not c["dynamic"]:
+                set_colliders(crate, False)
             approx = "off" if pc["crate"].get("collision") is False else str(pc["crate"].get("collision") or "none")
-            if approx == "off":                            # only to look at: no collider, no rigid body (the hinged wire handles would fall off), no joint
+            if approx == "off":
                 for q in list(Usd.PrimRange(crate)):
                     if q.HasAPI(UsdPhysics.CollisionAPI):
                         UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
@@ -1168,47 +1349,50 @@ def build_stage(robots):
                 for q in Usd.PrimRange(crate):
                     if q.IsA(UsdGeom.Mesh) and q.HasAPI(UsdPhysics.CollisionAPI):
                         UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr(approx)
-            if c.get("switch_off"):                        # pallets.physics switch: not its turn yet: no collider (switched on from /crate_active, see switch_crate)
-                for q in Usd.PrimRange(crate):
-                    if q.HasAPI(UsdPhysics.CollisionAPI):
-                        UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-        for p in pl["parts"]:                       # the parts of the top layers move (/World/pile: clickable like the pile), the ones below only fill the crates
+                        if approx == "sdf":
+                            PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(q).CreateSdfResolutionAttr(int(pc["crate"].get("sdf_resolution", 256)))
+            if c.get("switch_off"):
+                set_colliders(crate, False)
+        for p in pl["parts"]:
             path = (f"/World/pile/{pname}_p{p['pallet']}_L{p['layer']}_C{p['crate']}_{p['j']:02d}" if p["dynamic"]
                     else f"/World/pallets/pallet_{p['pallet']}/L{p['layer']}_C{p['crate']}_{pname}_{p['j']:02d}")
             pos = list(p["pos"])
-            if p["dynamic"] and str(pc["crate"].get("collision", "none")) == "convexHull":   # the hull of a crate is solid up to its rim: the parts that move rest on top of it, not on the floor inside
+            if p["dynamic"] and str(pc["crate"].get("collision", "none")) == "convexHull":
                 pos[2] += float(pc["crate"]["size_m"][2]) - float(pc["crate"]["floor_z_m"])
             place(path, pl["part_usd"], pos, R=p["R"])
-            if p["dynamic"] and p["layer"] >= int(pc.get("layers", 6)) - int(pc.get("sdf_layers", 0)):     # the parts the robot picks: their exact shape (SDF), set before the physics starts (a change of the collision type later restarts the physics)
+            if p["dynamic"]:
+                api_ = PhysxSchema.PhysxRigidBodyAPI.Apply(stage.GetPrimAtPath(path))
+                for method_, value_ in PART_PHYSX.items():
+                    getattr(api_, method_)().Set(value_)
+                col_ = PhysxSchema.PhysxCollisionAPI.Apply(stage.GetPrimAtPath(f"{path}/geometry"))
+                col_.CreateContactOffsetAttr().Set(CONTACT_OFFSET_M)
+                col_.CreateRestOffsetAttr().Set(REST_OFFSET_M)
+            if p["dynamic"] and p["layer"] >= int(pc.get("layers", 6)) - int(pc.get("sdf_layers", 0)):
                 gp = stage.GetPrimAtPath(f"{path}/geometry")
                 UsdPhysics.MeshCollisionAPI.Apply(gp).CreateApproximationAttr("sdf")
                 PhysxSchema.PhysxSDFMeshCollisionAPI.Apply(gp).CreateSdfResolutionAttr(int(pc.get("sdf_resolution", 256)))
-            if p.get("switch_off"):                        # a body already (switching it on later must not add one: that would restart the physics), but frozen and without collider
-                for q in Usd.PrimRange(stage.GetPrimAtPath(path)):
-                    if q.HasAPI(UsdPhysics.CollisionAPI):
-                        UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
+            if p.get("switch_off"):
+                set_colliders(stage.GetPrimAtPath(path), False)
                 UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath(path)).CreateKinematicEnabledAttr(True)
             if not p["dynamic"]:
                 stage.GetPrimAtPath(path).RemoveAPI(UsdPhysics.RigidBodyAPI)
-                if s.get("pallet_physics"):                    # pallets.physics of the map: a layer with physics: false has no collision at all (not even a static one): the robot never gets there
-                    for q in Usd.PrimRange(stage.GetPrimAtPath(path)):
-                        if q.HasAPI(UsdPhysics.CollisionAPI):
-                            UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-    if s.get("map"):                              # environment made in the GUI: its top-level prims (not the render settings / cameras / lights its stage saved)
+                if s.get("pallet_physics"):
+                    set_colliders(stage.GetPrimAtPath(path), False)
+    if s.get("map"):
         layer = Sdf.Layer.FindOrOpen(s["map"])
         UsdGeom.Xform.Define(stage, "/World/map")
         for spec in layer.rootPrims:
             if spec.name.startswith(("Render", "Omni")) or spec.typeName in ("Camera",) or spec.typeName.endswith("Light"):
-                continue                          # what the Kit stage saved around the scene: render settings, viewport cameras, light rig
+                continue
             stage.DefinePrim(f"/World/map/{spec.name}").GetReferences().AddReference(s["map"], f"/{spec.name}")
-        for m in s.get("machines") or []:         # the machine takes the place of the static copy (an STL) of it in the map: that one is switched off
+        for m in s.get("machines") or []:
             if m.get("replaces"):
                 old = stage.GetPrimAtPath("/World/map/" + str(m["replaces"]).strip("/"))
                 if old.IsValid():
                     old.SetActive(False)
                 else:
                     print(f"[WARN] machine {m['name']}: {m['replaces']} not found in the map: the static copy stays", flush=True)
-    for mc_ in s.get("map_collision") or []:      # scene.map_collision: the collision of parts of the map (it is as made in the GUI otherwise): convexHull | convexDecomposition | meshSimplification | none (triangle mesh) | off = no collider
+    for mc_ in s.get("map_collision") or []:
         root = stage.GetPrimAtPath("/World/map/" + str(mc_["prim"]).strip("/"))
         if not root.IsValid():
             print(f"[WARN] map_collision: {mc_['prim']} not found in the map", flush=True)
@@ -1219,13 +1403,13 @@ def build_stage(robots):
                 mode = str(mc_.get("collision", "convexHull"))
                 if mode == "off":
                     UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-                elif mode == "convexDecomposition":                          # options: {max_hulls, voxel_resolution, error_percentage, ...} as for the machines
+                elif mode == "convexDecomposition":
                     apply_decomposition(q, mc_.get("options"))
                 else:
                     UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr(mode)
                 n += 1
         print(f"[INFO] map_collision: {mc_['prim']}: {n} collider(s) -> {mc_.get('collision', 'convexHull')}", flush=True)
-    for ed in s.get("map_edits") or []:           # scene.map_edits: parts of the map stretched in height: every vertex of the meshes below `prim` that is higher than above_z_m (world) moves up by dz_m
+    for ed in s.get("map_edits") or []:
         root = stage.GetPrimAtPath("/World/map/" + str(ed["prim"]).strip("/"))
         if not root.IsValid():
             print(f"[WARN] map_edits: {ed['prim']} not found in the map", flush=True)
@@ -1236,15 +1420,50 @@ def build_stage(robots):
                 continue
             mesh = UsdGeom.Mesh(q)
             P = np.array(mesh.GetPointsAttr().Get(), dtype=np.float64)
-            M = np.array(UsdGeom.Xformable(q).ComputeLocalToWorldTransform(Usd.TimeCode.Default()), dtype=np.float64).T   # column vectors: world = M[:3,:3] p + M[:3,3]
+            M = np.array(UsdGeom.Xformable(q).ComputeLocalToWorldTransform(Usd.TimeCode.Default()), dtype=np.float64).T
             W = P @ M[:3, :3].T + M[:3, 3]
-            W[W[:, 2] > float(ed["above_z_m"]), 2] += float(ed["dz_m"])
+            if ed.get("scale_z") is not None:
+                W[:, 2] *= float(ed["scale_z"])
+            if ed.get("dz_m") is not None:
+                W[W[:, 2] > float(ed["above_z_m"]), 2] += float(ed["dz_m"])
             P2 = (W - M[:3, 3]) @ np.linalg.inv(M[:3, :3]).T
             mesh.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(P2.astype(np.float32)))
             mesh.GetExtentAttr().Set(Vt.Vec3fArray([Gf.Vec3f(*[float(v) for v in P2.min(0)]), Gf.Vec3f(*[float(v) for v in P2.max(0)])]))
             n += 1
-        print(f"[INFO] map_edits: {ed['prim']}: {n} mesh(es) stretched by {ed['dz_m']} m above z {ed['above_z_m']} m", flush=True)
-    if s.get("platform"):                         # pedestal: static box, pos_m = bottom centre
+        print(f"[INFO] map_edits: {ed['prim']}: {n} mesh(es)" + (f" scaled x{ed['scale_z']} in z" if ed.get("scale_z") is not None else "")
+              + (f" stretched by {ed['dz_m']} m above z {ed['above_z_m']} m" if ed.get("dz_m") is not None else ""), flush=True)
+    for mm in s.get("map_materials") or []:
+        where = str(mm["prim"])
+        root = stage.GetPrimAtPath(where if where.startswith("/") else "/World/map/" + where.strip("/"))
+        if not root.IsValid():
+            print(f"[WARN] map_materials: {mm['prim']} not found in the stage", flush=True)
+            continue
+        make_editable([root])
+        for q in [q for q in Usd.PrimRange(root) if q.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(q).ComputePurpose() == UsdGeom.Tokens.default_]:
+            paint_solids(stage, q, mm.get("rules") or [mm], root.GetName())
+    for k, pr in enumerate(s.get("props") or []):
+        name = re.sub(r"\W", "_", str(pr.get("name", f"prop_{k}")))
+        path = f"/World/props/{name}"
+        UsdGeom.Xform.Define(stage, "/World/props")
+        sx, sy, sz = (float(v) for v in pr["size_m"])
+        if str(pr.get("shape", "box")) == "cylinder":
+            geom = UsdGeom.Cylinder.Define(stage, path)
+            geom.CreateRadiusAttr(sx / 2.0)
+            geom.CreateHeightAttr(sz)
+            scale = None
+        else:
+            geom = UsdGeom.Cube.Define(stage, path)
+            geom.CreateSizeAttr(1.0)
+            scale = Gf.Vec3f(sx, sy, sz)
+        fx = UsdGeom.Xformable(geom)
+        px, py, pz = (float(v) for v in pr["pos_m"])
+        fx.AddTranslateOp().Set(Gf.Vec3d(px, py, pz))
+        q = mat_to_quat(rpy_to_mat(pr.get("rpy_deg", [0, 0, 0])))
+        fx.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(float(q[0]), Gf.Vec3d(*map(float, q[1:]))))
+        if scale is not None:
+            fx.AddScaleOp().Set(scale)
+        UsdShade.MaterialBindingAPI.Apply(geom.GetPrim()).Bind(paint_material(stage, f"prop_{name}", pr))
+    if s.get("platform"):
         pf = s["platform"]
         sx, sy, sz = (float(v) for v in pf["size_m"])
         px, py, pz = (float(v) for v in pf.get("pos_m", [0, 0, 0]))
@@ -1259,7 +1478,7 @@ def build_stage(robots):
         UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
     update(5)
     for r in robots:
-        if r["gripper_links"] and r.get("gripper_material"):   # {metallic, roughness} on every visual material of the gripper links
+        if r["gripper_links"] and r.get("gripper_material"):
             n = set_materials(stage, r["prim"], [{"links": [re.escape(ln) for ln in r["gripper_links"]],
                                                    **{k: r["gripper_material"].get(k) for k in ("metallic", "roughness")}}])
             print(f"[INFO] gripper material {dict(r['gripper_material'])} on {n} materials", flush=True)
@@ -1276,31 +1495,38 @@ def build_stage(robots):
             print(f"[INFO] {r['prim']}: collision_decomposition {dict(r['collision_decomposition']) if isinstance(r['collision_decomposition'], dict) else list(r['collision_decomposition'])}: "
                   f"{n} colliders -> convexDecomposition", flush=True)
     for r in robots:
-        if r.get("collision_friction"):                  # {link-name regex: friction} of the robot yaml (the fingertips): combine mode max = it wins over the part's 0.5
+        if r.get("collision_friction"):
             n, _ = set_collision_friction(stage, r["collision_friction"], r["prim"], f"{r['name']}_robot", combine="max")
             print(f"[INFO] {r['prim']}: collision_friction {dict(r['collision_friction'])} (combine max): {n} colliders", flush=True)
+    for r in robots:
+        if r.get("collision_ccd"):
+            n = set_collision_ccd(stage, r["collision_ccd"], r["prim"])
+            print(f"[INFO] {r['prim']}: collision_ccd {list(r['collision_ccd'])}: {n} bodies", flush=True)
     for m in s.get("machines") or []:
         if m.get("collision_decomposition"):
             n = set_collision_decomposition(stage, m["collision_decomposition"], f"/World/machines/{m['name']}")
             print(f"[INFO] machine {m['name']}: collision_decomposition {list(m['collision_decomposition'])}: {n} colliders -> convexDecomposition", flush=True)
         att = m.get("attach") or {}
-        if att.get("enabled", True) and att.get("jig_links") and att.get("jig_collision") is False:   # the jigs are only to look at: the parts put on them are removed
+        if att.get("enabled", True) and att.get("jig_links") and att.get("jig_collision") is False:
             rx = [re.compile(str(q)) for q in att["jig_links"]]
             n = 0
             for p in Usd.PrimRange(stage.GetPrimAtPath(f"/World/machines/{m['name']}")):
                 if any(r.fullmatch(p.GetName()) for r in rx):
-                    for q in Usd.PrimRange(p):
-                        if q.HasAPI(UsdPhysics.CollisionAPI):
-                            UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-                            n += 1
+                    n += set_colliders(p, False)
             print(f"[INFO] machine {m['name']}: jigs {list(att['jig_links'])} without collider ({n}): the parts put on them are removed", flush=True)
-        if m.get("collision") is False:                                  # the whole machine only to look at: no collider on any of its links (its joints still move)
-            n = 0
-            for q in Usd.PrimRange(stage.GetPrimAtPath(f"/World/machines/{m['name']}")):
-                if q.HasAPI(UsdPhysics.CollisionAPI):
-                    UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(False)
-                    n += 1
+        if m.get("collision") is False:
+            n = set_colliders(stage.GetPrimAtPath(f"/World/machines/{m['name']}"), False)
             print(f"[INFO] machine {m['name']}: collision false: {n} colliders off (only to look at)", flush=True)
+        for p_ in Usd.PrimRange(stage.GetPrimAtPath(f"/World/machines/{m['name']}")):
+            if p_.GetName().startswith("seat_"):
+                for q_ in Usd.PrimRange(p_):
+                    if q_.IsA(UsdGeom.Mesh) and q_.HasAPI(UsdPhysics.CollisionAPI):
+                        col_ = PhysxSchema.PhysxCollisionAPI.Apply(q_)
+                        col_.CreateContactOffsetAttr().Set(CONTACT_OFFSET_M)
+                        col_.CreateRestOffsetAttr().Set(REST_OFFSET_M)
+        if m.get("collision_friction_max"):
+            n, _ = set_collision_friction(stage, m["collision_friction_max"], f"/World/machines/{m['name']}", f"{m['name']}_max", combine="max")
+            print(f"[INFO] machine {m['name']}: collision_friction_max {dict(m['collision_friction_max'])} (combine max): {n} colliders", flush=True)
         if m.get("collision_friction"):
             n, mats = set_collision_friction(stage, m["collision_friction"], f"/World/machines/{m['name']}", m["name"], m.get("friction_override"))
             s.setdefault("friction_mats", {})[m["name"]] = mats
@@ -1316,8 +1542,6 @@ def build_stage(robots):
         c["path"] = make_fixed_camera(stage, c)
         print(f"[INFO] camera {c['name']} at {c['pos_m']} looking at {c['look_at_m']}: publish std_msgs/Empty on /{c['name']}/capture for one picture", flush=True)
 
-    # drives + start pose on the joint prims before physics starts (USD units as in the lite6 script: N*m/deg, deg),
-    # so the robot is stiff from the first frame and does not jump
     def drives(prefix, joints, q_start, stiffness, damping):
         for jp in stage.Traverse():
             info = joints.get(jp.GetName())
@@ -1329,9 +1553,8 @@ def build_stage(robots):
             drv.CreateStiffnessAttr().Set(float(stiffness[kind]))
             drv.CreateDampingAttr().Set(float(damping[kind]))
             drv.CreateTargetPositionAttr().Set(start)
-            if info[4] > 0:  # URDF effort = the drive's force limit (N*m, prismatic N): the gripper jaws push with the real
-                drv.CreateMaxForceAttr().Set(float(info[4]))  # gripper force (JEGG-2510 75 N per jaw), the arm with its real
-                                                              # torque - without it both push with unlimited force through parts
+            if info[4] > 0:
+                drv.CreateMaxForceAttr().Set(float(info[4]))
             PhysxSchema.JointStateAPI.Apply(jp, kind).CreatePositionAttr().Set(start)
 
     for r in robots:
@@ -1340,36 +1563,33 @@ def build_stage(robots):
     for m in s.get("machines") or []:
         prefix = f"/World/machines/{m['name']}"
         drives(prefix, m["joints"], m["q0"], MACHINE_STIFFNESS, {**MACHINE_DAMPING, **({"angular": float(m["rotor_damping"])} if m.get("rotor_damping") else {})})
-        for p in Usd.PrimRange(stage.GetPrimAtPath(prefix)):    # the collision boxes of the frame overlap the rotors and jaws: their links must not collide with each other
+        for p in Usd.PrimRange(stage.GetPrimAtPath(prefix)):
             if p.HasAPI(UsdPhysics.ArticulationRootAPI):
                 PhysxSchema.PhysxArticulationAPI.Apply(p).CreateEnabledSelfCollisionsAttr().Set(False)
 
 
 def main():
-    globals().update(robot.get("sim_consts") or {})   # ARRIVE_TOL, SETTLE_FRAMES, GRIP_GRACE, GRIP_WINDOW from the robot yaml
-    contexts = {}                                # ROS domain id of a robot (di; None = the one of the environment) -> (its rclpy context, its executor)
+    globals().update(robot.get("sim_consts") or {})
+    contexts = {}
 
-    def ros(di):
-        """the rclpy context and executor of one ROS domain: the nodes of a robot live in its domain, so every robot is controlled on its own"""
-        if di not in contexts:
+    def ros(id):
+        if id not in contexts:
             ctx = rclpy.Context()
-            rclpy.init(args=[], context=ctx, **({} if di is None else {"domain_id": int(di)}))   # (not the command line: rcl would read robot:=ur5e as a remap rule)
-            contexts[di] = (ctx, MultiThreadedExecutor(context=ctx))
-        return contexts[di]
-    units = []                                   # per robot: its settings, articulation, ROS bridge and rate-limited command
+            rclpy.init(args=[], context=ctx, **({} if id is None else {"domain_id": int(id)}))
+            contexts[id] = (ctx, MultiThreadedExecutor(context=ctx))
+        return contexts[id]
+    units = []
     try:
         for r in robots:
-            r["usd"] = robot_usd(r, args.force_convert)  # before the stage is built: the converter uses its own stages
+            r["usd"] = robot_usd(r, args.force_convert)
             print(f"[INFO] {r['urdf']} -> {r['usd']}", flush=True)
-        # objects, bin + pile and basket are optional: whatever cannot be prepared (missing file, bad config) is skipped with a warning
-        # and the robot starts without it
         if robot["objects"]:
             from binsim.assets import prepare_part
             ready = []
             for o in robot["objects"]:
                 try:
                     o["usd"] = prepare_part(o["cfg"], os.path.join(REPO, "assets_cache")).usd_path
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"[WARN] object {o['part']} skipped: {type(e).__name__}: {e}", flush=True)
                     continue
                 ready.append(o)
@@ -1382,7 +1602,7 @@ def main():
                 b["usd"], b["pile"], mode = plan_pile(b, os.path.join(REPO, "assets_cache"))
                 print(f"[INFO] bin at {b['pos_m']} m (world), pile: {len(b['pile'])} x "
                       f"{b['part']['name'] if b['part'] else '-'} ({mode}, seed {b['seed']}) -> /World/pile", flush=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[WARN] bin and pile skipped: {type(e).__name__}: {e}", flush=True)
                 robot["bin"] = None
         if robot.get("pallets"):
@@ -1391,12 +1611,12 @@ def main():
                 pc["plan"] = plan_pallet_crates(pc, os.path.join(REPO, "assets_cache"))
                 pl = pc["plan"]
                 phys = robot.get("pallet_physics") or {}
-                if phys:                                                            # pallets.physics of the map, per pallet and layer: the parts of a layer with physics: false are fixed in their crates (static, no cost)
-                    def has_physics(pallet, layer, crate, default):             # the layer has physics, and (when `crates:` names some) this crate is one of them (switch: every crate of the layer)
+                if phys:
+                    def has_physics(pallet, layer, crate, default):
                         ph = phys.get((pallet, layer))
                         return default if ph is None else (ph[0] and (ph[1] is None or crate in ph[1] or ph[2]))
 
-                    def switched_off(pallet, layer, crate):                     # switch: true: a crate of the layer that is not in `crates:` starts switched off (no collider, its parts frozen)
+                    def switched_off(pallet, layer, crate):
                         ph = phys.get((pallet, layer))
                         return bool(ph and ph[0] and ph[2] and ph[1] is not None and crate not in ph[1])
                     for c in pl["crates"]:
@@ -1406,10 +1626,10 @@ def main():
                         p["dynamic"] = has_physics(p["pallet"], p["layer"], p["crate"], p["dynamic"])
                         p["switch_off"] = switched_off(p["pallet"], p["layer"], p["crate"])
                 n_dyn = sum(p["dynamic"] for p in pl["parts"])
-                print(f"[INFO] pallets: {len(pc['items'])} x {int(pc.get('layers', 6))} layers, {len(pl['crates'])} crates, {len(pl['parts'])} x "
+                print(f"[INFO] pallets: {sum(bool(i.get('enabled', True)) for i in pc['items'])} of {len(pc['items'])} on x {int(pc.get('layers', 6))} layers, {len(pl['crates'])} crates, {len(pl['parts'])} x "
                       f"{(pc.get('part_cfg') or {}).get('name', '-')} ({n_dyn} movable, seed {pc['seed']}); grids per layer (nx x ny): "
                       + " | ".join(",".join(f"{a}x{b}" for a, b in g) for g in pl["grids"]), flush=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[WARN] pallets skipped: {type(e).__name__}: {e}", flush=True)
                 robot["pallets"] = None
         if robot.get("map"):
@@ -1424,7 +1644,7 @@ def main():
                 k["usd"] = prepare_bin(k, os.path.join(REPO, "assets_cache")).usd_path
                 print(f"[INFO] basket {k['size_m']} m at {k['pos_m']} m (world), floor top at z = "
                       f"{k['pos_m'][2] + k['wall_thickness_m']:.3f} m -> /World/basket", flush=True)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"[WARN] basket skipped: {type(e).__name__}: {e}", flush=True)
                 robot["basket"] = None
         for r in robots:
@@ -1435,10 +1655,10 @@ def main():
                 if lead in r["q0"]:
                     r["q0"][n] = r["q0"][lead] * k + off
         ready = []
-        for m in robot["machines"]:               # machines are optional like the objects: whatever cannot be converted is skipped with a warning
+        for m in robot["machines"]:
             try:
-                m["usd"] = robot_usd(m, args.force_convert)
-            except Exception as e:  # noqa: BLE001
+                m["usd"] = kinematic_usd(m) if m.get("kinematic") else robot_usd(m, args.force_convert)
+            except Exception as e:
                 print(f"[WARN] machine {m['name']} skipped: {type(e).__name__}: {e}", flush=True)
                 continue
             jp0 = m.get("joint_pos") or {}
@@ -1447,6 +1667,9 @@ def main():
             print(f"[INFO] machine {m['name']} at {m.get('pos_m', [0, 0, 0])} m, rpy {m.get('rpy_deg', [0, 0, 0])} deg -> {m['usd']}", flush=True)
         robot["machines"] = ready
         build_stage(robots)
+        if args.export_layout:
+            export_layout(robots, os.path.abspath(args.export_layout))
+            return
 
         for r in robots:
             root_path = Articulation.fetch_articulation_root_api_prim_paths(r["prim"])[0]
@@ -1454,9 +1677,12 @@ def main():
                 print(f"[ERROR] no articulation root under {r['prim']} in {r['usd']}", flush=True)
                 return
             units.append({"r": r, "root": root_path, "art": Articulation(root_path)})
-        machines = []                             # articulated machines of the scene: the articulation, its ROS bridge, the rate-limited command
+        machines = []
         for m in robot["machines"]:
             mpath = f"/World/machines/{m['name']}"
+            if m.get("kinematic"):
+                machines.append({"m": m, "root": mpath, "art": KinArticulation(m, mpath)})
+                continue
             mroot = Articulation.fetch_articulation_root_api_prim_paths(mpath)[0]
             if mroot is None:
                 print(f"[WARN] machine {m['name']}: no articulation root under {mpath}: its joints cannot be moved", flush=True)
@@ -1466,44 +1692,47 @@ def main():
         timeline.play()
         update(2)
 
-        for u in units:                          # every robot: its ROS bridge in its own domain (di)
+        for u in units:
             r = u["r"]
             u["names"] = list(u["art"].dof_names)
             u["cmd"] = np.array([r["q0"].get(n, 0.0) for n in u["names"]])
-            u["cmd0"] = u["cmd"].copy()          # the start pose, where the arm is again after a restart of the physics
-            u["step"] = np.array([r["joints"].get(n, (None, 0, 0, 1.0))[3] for n in u["names"]]) * float(r.get("speed", 0.3)) / APP_HZ
+            u["cmd0"] = u["cmd"].copy()
+            u["step"] = np.array([r["joints"].get(n, (None, 0, 0, 1.0))[3] * float(r.get("gripper_speed", r.get("speed", 0.3)) if n in r["gripper_joints"] or n in r["mimic"] else r.get("speed", 0.3))
+                                  for n in u["names"]]) / APP_HZ
+            u["step_slow"] = u["step"] * np.array([float(r["slow_speed"]) / float(r.get("speed", 0.3)) if r.get("slow_speed") and not (n in r["gripper_joints"] or n in r["mimic"]) else 1.0
+                                                   for n in u["names"]])
             controller = "/" + str(r.get("controller", f"{r['name']}_controller")).strip("/")
             gripper = {n: r["joints"][n][1:3] for n in r["gripper_joints"]}
             gripper_topic = str(r.get("gripper_topic") or "/gripper/command")
             limits = [r["joints"][n][1:3] if n in r["joints"] else (-math.inf, math.inf) for n in u["names"]]
-            ctx, ex = ros(r.get("di"))
+            ctx, ex = ros(r.get("id"))
             u["node"] = RobotBridge(u["names"], u["cmd"], controller, r["mimic"], gripper, gripper_topic, limits, context=ctx)
             ex.add_node(u["node"])
-            print(f"[INFO] robot {r['name']} at {r['prim']} (ROS domain {r['di'] if r.get('di') is not None else os.environ.get('ROS_DOMAIN_ID', '0')}) ready "
-                  f"(gripper: {r['gripper']}): joints {u['names']}, max speed {r.get('speed', 0.3)} x URDF limits", flush=True)
+            print(f"[INFO] robot {r['name']} at {r['prim']} (ROS domain {r['id'] if r.get('id') is not None else os.environ.get('ROS_DOMAIN_ID', '0')}) ready "
+                  f"(gripper: {r['gripper']}): joints {u['names']}, max speed {r.get('speed', 0.3)} x URDF limits" + (f", {r['slow_speed']} x while /motion/slow (the final descents)" if r.get("slow_speed") else ""), flush=True)
             print(f"[INFO]   ROS 2: {controller}/joint_trajectory, {controller}/follow_joint_trajectory -> sim, sim -> /joint_states"
                   + (f"; gripper {r['gripper']}: {gripper_topic} (std_msgs/Float64) 0 = closed, 1 = open -> {list(gripper)}" if gripper else ""), flush=True)
-        node = units[0]["node"]                  # the first robot: the log lines of the loop (frames, last commands)
-        mctx, executor = ros(robot.get("di"))    # the machines live in the domain of the first robot
+        node = units[0]["node"]
+        mctx, executor = ros(robot.get("id"))
         for mc in machines:
             m = mc["m"]
             mc["names"] = list(mc["art"].dof_names)
             mc["cmd"] = np.array([m["q0"].get(n, 0.0) for n in mc["names"]])
             mc["cmd0"] = mc["cmd"].copy()
-            speeds = [(str(rx), float(f)) for rx, f in (m.get("joint_speeds") or {}).items()]   # joint_speeds of the machine yaml: {joint-name regex: x URDF limit}
+            speeds = [(str(rx), float(f)) for rx, f in (m.get("joint_speeds") or {}).items()]
             mc["step"] = np.array([m["joints"][n][3] * next((f for rx, f in speeds if re.fullmatch(rx, n)), float(m.get("speed", 1.0)))
                                    for n in mc["names"]]) / APP_HZ
-            mc["vel"] = np.zeros(len(mc["names"]))                                  # velocity of the command (rad/s, m/s)
+            mc["vel"] = np.zeros(len(mc["names"]))
             mc["rot"] = np.array([m["joints"][n][0] != "prismatic" for n in mc["names"]])
             acc_rot, acc_lin = float(m.get("rotor_accel_rad_s2") or MACHINE_ACCEL["angular"]), float(m.get("jaw_accel_m_s2") or MACHINE_ACCEL["linear"])
             mc["acc"] = np.where(mc["rot"], acc_rot, acc_lin)
             mc["mname"] = m["name"]
             damping = float(m.get("rotor_damping") or MACHINE_DAMPING["angular"])
-            effort = max((info[4] for info in m["joints"].values() if info[0] != "prismatic"), default=0.0)   # the strongest rotor drive (URDF effort, N*m)
+            effort = max((info[4] for info in m["joints"].values() if info[0] != "prismatic"), default=0.0)
             print(f"[INFO] machine {m['name']}: speed {float(m.get('speed', 1.0)):g} x URDF limit, joint_speeds {dict(speeds)}; acceleration rotors {acc_rot:g} rad/s2, "
                   f"jaws {acc_lin:g} m/s2; rotor damping {damping:g}" + (f" (speed limit by the drive force {effort / damping:.0f} deg/s)" if effort else ""), flush=True)
-            mc["q"] = mc["cmd"].copy()                                              # measured positions of the last frame
-            mc["carrier"] = np.zeros(len(mc["names"]), bool)                        # the joints of the belt: not driven by joint_command (set below)
+            mc["q"] = mc["cmd"].copy()
+            mc["carrier"] = np.zeros(len(mc["names"]), bool)
             mc["node"] = MachineBridge(m["name"], mc["names"], mc["cmd"], [m["joints"][n][1:3] for n in mc["names"]], m, context=mctx)
             executor.add_node(mc["node"])
             mc["last_target"] = mc["node"].targets()
@@ -1514,7 +1743,7 @@ def main():
                 if bad:
                     print(f"[WARN] machine {m['name']}: carriers of its yaml name joints that do not exist ({bad}): the carriers stay where they are", flush=True)
                 else:
-                    mc["carriers"] = {"node": CarrierBridge(m["name"], c.get("topic") or f"/{m['name']}/carriers", c["joints"], c["slots_m"], c["window_m"], c.get("speed_mps", 0.1), c.get("accel_mps2"), context=mctx),
+                    mc["carriers"] = {"node": CarrierBridge(m["name"], c.get("topic") or f"/{m['name']}/carriers", c["joints"], c["slots_m"], c["window_m"], c.get("speed_mps", 0.1), c.get("accel_mps2"), context=mctx, reverse=bool(c.get("reverse"))),
                                       "idx": [mc["names"].index(n) for n in c["joints"]]}
                     mc["carriers"]["last"] = mc["carriers"]["node"].positions()
                     mc["carrier"][mc["carriers"]["idx"]] = True
@@ -1528,18 +1757,12 @@ def main():
             threading.Thread(target=ex.spin, daemon=True).start()
         print(f"[INFO] physics {int(robot.get('physics_hz', 60))} Hz", flush=True)
 
-        # click a part in the viewport -> its pose is printed as "x y z roll pitch yaw" (and the TCP pose that grips it below), the Translate and Rotate X Y Z of Isaac's Property
-        # panel (m, deg; read live from the physics, the panel itself may keep showing the start values). The event only remembers
-        # the clicked parts, the pose is read in the loop below
         clicked, views = [], {}
         picture_panel = PicturePanel()
-        part_view = [None, None]                 # [RigidPrim over all parts of /World/pile, their paths]: the parts nearest to a /target_pose
+        part_view = [None, None]
 
 
         def rebuild_views(why):
-            """Deleting a prim in the GUI (a plate) invalidates the physics tensor views (PhysX: "Simulation view object is invalidated") and
-            they can only be made again by playing the timeline anew: the physics restarts from the start state (the arm and the parts that
-            moved are back where they began, the deleted prims stay deleted) instead of the app closing"""
             print(f"[WARN] a prim was deleted: the physics views are invalid ({why}); restarting the physics from the start state", flush=True)
             views.clear()
             part_view[0] = None
@@ -1552,12 +1775,13 @@ def main():
                 u["cmd"] = u["cmd0"].copy()
                 u["node"]._set(u["names"], u["cmd"])
             for mc in machines:
-                mc["art"] = Articulation(mc["root"])
+                if not isinstance(mc["art"], KinArticulation):
+                    mc["art"] = Articulation(mc["root"])
                 mc["cmd"] = mc["cmd0"].copy()
-                if mc["carriers"]:                                            # the physics starts from the start state: the carriers are at their slots again
+                if mc["carriers"]:
                     mc["carriers"]["node"].s = mc["carriers"]["node"].goal = 0.0
                     mc["carriers"]["last"] = mc["carriers"]["node"].positions()
-            omni.usd.get_context().get_selection().clear_selected_prim_paths()     # so that clicking the same part again fires the event
+            omni.usd.get_context().get_selection().clear_selected_prim_paths()
 
         def on_stage_event(event):
             if event.type == int(omni.usd.StageEventType.SELECTION_CHANGED):
@@ -1566,11 +1790,10 @@ def main():
                 if paths and not clicked:
                     print(f"[INFO] {paths[0]} is not a part that can be picked (only the plates of the top layer / the objects move): no pose printed", flush=True)
         stage_sub = omni.usd.get_context().get_stage_event_stream().create_subscription_to_pop(on_stage_event, name="robot_sim click")
-        refined = {}     # part path -> (its original max_convex_hulls, its original voxel resolution), for the part that has CLICK_HULLS / CLICK_VOXELS now (only one at a time)
-        refined_at = {}  # part path -> where it lay when it was refined (see CARRIED_M)
+        refined = {}
+        refined_at = {}
 
         def pile_positions():
-            """part path -> its world position now (m), for every part of the pile"""
             view, paths = pile_view()
             return dict(zip(paths, np.array(view.get_world_poses()[0].numpy()))) if view is not None else {}
 
@@ -1580,28 +1803,24 @@ def main():
                 refined_at[path] = at
 
         def carried():
-            """the refined parts the robot carried away from where they were refined: they keep the fine collider and the stiff settings"""
             pos = pile_positions()
             return {p for p, at in refined_at.items() if p in pos and np.linalg.norm(pos[p] - at) > CARRIED_M}
 
         def set_click_physx(prim, stiff):
-            """CLICK_PHYSX contact settings on the rigid body of a part: stiff = the clicked part, else the PhysX defaults"""
             api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
             kinematic = bool(UsdPhysics.RigidBodyAPI(prim).GetKinematicEnabledAttr().Get())
             for method, (on, off) in CLICK_PHYSX.items():
-                if not (stiff and kinematic and method == "CreateEnableCCDAttr"):   # PhysX: kinematic bodies with CCD are not supported
+                if not (stiff and kinematic and method == "CreateEnableCCDAttr"):
                     getattr(api, method)().Set(on if stiff else off)
 
-        stiff_order = []     # paths of the parts that have the stiff contact settings now, the newest last
-        plate_ev = {}        # plate path -> [(time, what happened to its collider / physics)], the last ones: the BOOM line (boom_step) tells them
+        stiff_order = []
+        plate_ev = {}
 
         def note(path, text):
             plate_ev.setdefault(path, []).append((time.time(), text))
             del plate_ev[path][:-6]
 
         def make_stiff(path):
-            """CLICK_PHYSX stiff settings for the part the fingers go into; of the parts that still lie where they were refined only the STIFF_KEEP newest keep them (16 solver iterations + CCD
-            on every clicked part are heavy). A part the robot carried keeps them until attach_parts removes it on a jig"""
             st_ = omni.usd.get_context().get_stage()
             set_click_physx(st_.GetPrimAtPath(path), True)
             note(path, "stiff contact settings ON (solver 16 / CCD)")
@@ -1618,13 +1837,11 @@ def main():
                     note(old_path, "stiff contact settings off")
 
         def refine_collision(path):
-            """The clicked part gets CLICK_HULLS convex hulls on a CLICK_VOXELS voxel grid (PhysX cooks its collider again); of the parts that still lie where they were refined
-            the oldest beyond CLICK_KEEP go back to their own (a part the robot carried keeps it, see CARRIED_M)"""
             stage_now = omni.usd.get_context().get_stage()
             busy = carried()
             idle = [(old, nv) for old, nv in refined.items() if old not in busy]
             for old, (n, voxels) in idle[:max(0, len(idle) - CLICK_KEEP + 1)]:
-                if old != path and n is None:                                # an SDF part: only its contact settings were changed
+                if old != path and n is None:
                     set_click_physx(stage_now.GetPrimAtPath(old), False)
                     refined.pop(old)
                     refined_at.pop(old, None)
@@ -1638,14 +1855,14 @@ def main():
                     refined.pop(old)
                     refined_at.pop(old, None)
             if str(UsdPhysics.MeshCollisionAPI(stage_now.GetPrimAtPath(f"{path}/geometry")).GetApproximationAttr().Get()) == "sdf" and path not in refined:
-                refined[path] = (None, None)                                 # already its exact shape: nothing to cook, only the stiff contact settings
+                refined[path] = (None, None)
                 remember_at(path)
                 make_stiff(path)
                 print(f"[INFO] {path}: exact shape (SDF), stiff contact settings", flush=True)
                 return
             attr = stage_now.GetPrimAtPath(f"{path}/geometry").GetAttribute(HULLS_ATTR)
             if not attr.IsValid() or path in refined:
-                return                                                       # not a convex decomposition part, or already fine
+                return
             geom = stage_now.GetPrimAtPath(f"{path}/geometry")
             voxels = geom.GetAttribute(VOXELS_ATTR)
             refined[path] = (int(attr.Get()), int(voxels.Get()) if voxels.IsValid() and voxels.Get() else VOXELS_DEFAULT)
@@ -1657,8 +1874,6 @@ def main():
             print(f"[INFO] {path}: {CLICK_HULLS} convex hulls instead of {refined[path][0]}, {CLICK_VOXELS} voxels instead of {refined[path][1]} (the collider is cooked again, this can take a moment)", flush=True)
 
         def refine_target(pos):
-            """The part the robot is sent to (/target_pose = the TCP = the part's centre) gets what a clicked part gets: the exact collider (CLICK_HULLS) and the
-            stiff contact settings (CLICK_PHYSX). Without it the fingers sink into the thin wall of the bore and the part sticks to them"""
             view, paths = pile_view()
             if view is None or not paths:
                 return
@@ -1669,7 +1884,7 @@ def main():
                 print(f"[INFO] target {pos[0]:.3f} {pos[1]:.3f} {pos[2]:.3f}: no part of the pile within {TARGET_RADIUS * 100:.0f} cm (nearest {dist[i] * 100:.1f} cm): nothing refined", flush=True)
                 return
             print(f"[INFO] target {pos[0]:.3f} {pos[1]:.3f} {pos[2]:.3f}: the part is {paths[i]} ({dist[i] * 100:.1f} cm away)", flush=True)
-            own = next((sw for sw in switch if paths[i] in sw["parts"]), None)    # a part of a switched-off crate (its /crate_active was missed): that crate gets the physics now
+            own = next((sw for sw in switch if paths[i] in sw["parts"]), None)
             if own is not None and not own["on"]:
                 print(f"[WARN] {paths[i]} lies in {own['name']}, which has no physics: switched on now", flush=True)
                 for sw in switch:
@@ -1682,12 +1897,11 @@ def main():
               "(compute_grasp_tcp_pose.py) and the state of the part (standard | turn_over) for ik_node / a sequence with `target: tcp`, to paste into ee_6d.py", flush=True)
 
         fx_state = {"t": 0.0, "mtime": {}, "fx": {mc["mname"]: dict(mc["m"].get("fixtures") or {}) for mc in machines}, "last": {}}
-        for mc in machines:                      # fixtures: of the machine yamls are read again when the file has changed (reload_fixtures)
+        for mc in machines:
             f = mc["m"].get("config_file")
             fx_state["mtime"][mc["mname"]] = os.path.getmtime(f) if f and os.path.isfile(f) else 0.0
 
         def fixture_friction():
-            """the friction of the jigs of a machine whose belt / chain moves is `friction_moving` (the plates ride along), at rest `friction` (a plate slides down the prongs into the windows)"""
             st = omni.usd.get_context().get_stage()
             for mc in machines:
                 car, name = mc.get("carriers"), mc.get("mname")
@@ -1708,7 +1922,6 @@ def main():
                 print(f"[INFO] friction of the jigs of {name}: {float(v):g} ({'moving' if moving else 'at rest'})", flush=True)
 
         def reload_fixtures():
-            """fixtures: of a machine yaml again when the file has changed: the friction of the jigs is changed while the simulation runs (a material attribute, no restart)"""
             for mc in machines:
                 path, name = mc["m"].get("config_file"), mc["mname"]
                 if not path or not os.path.isfile(path) or os.path.getmtime(path) == fx_state["mtime"].get(name):
@@ -1716,24 +1929,37 @@ def main():
                 fx_state["mtime"][name] = os.path.getmtime(path)
                 try:
                     fx_state["fx"][name] = dict(sim_config.machine_config(mc["m"]["entry"]).get("fixtures") or {})
-                    fx_state["last"].pop(name, None)                         # fixture_friction() sets the new values in the next frame
+                    fx_state["last"].pop(name, None)
                     print(f"[INFO] fixtures of {os.path.basename(path)} read again (no restart): {json.dumps(fx_state['fx'][name])}", flush=True)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"[WARN] fixtures of {path} not read: {type(e).__name__}: {e}", flush=True)
 
         rebuilds = 0
-        # attach: of a machine yaml (the conveyor): the parts that the hands put on its jigs are taken out of the simulation (hidden, no collider, no gravity, parked far below
-        # the floor). A deleted prim would invalidate every physics view (rebuild_views restarts the physics), and parts that stay on the chain cost contacts / kinematic updates
-        attaches = [{"mc": mc, "cfg": mc["m"]["attach"], "B": None, "bound": {}}   # bound: part path -> the carrier joint it was put on (removed)
+        attaches = [{"mc": mc, "cfg": mc["m"]["attach"], "B": None, "bound": {}}
                     for mc in machines if mc["m"].get("attach") and mc["m"]["attach"].get("enabled", True) and mc.get("carriers")]
-        PARK = (0.0, 0.0, -50.0)   # m: where the removed parts wait (no collider, no gravity: nothing is calculated for them)
+        PARK = (0.0, 0.0, -50.0)
+        removed = set()
 
         def bound_parts():
-            return {path for att in attaches for path in att["bound"]}
+            return {path for att in attaches for path in att["bound"]} | removed
+
+        def retire(st_, path, why):
+            part = st_.GetPrimAtPath(path)
+            set_colliders(part, False)
+            set_click_physx(part, False)
+            PhysxSchema.PhysxRigidBodyAPI.Apply(part).CreateDisableGravityAttr(True)
+            UsdGeom.Imageable(part).MakeInvisible()
+            note(path, why)
+            refined.pop(path, None)
+            refined_at.pop(path, None)
+            if path in stiff_order:
+                stiff_order.remove(path)
+
+        def park(view, idx):
+            view.set_world_poses(np.tile(np.array(PARK, dtype=np.float32), (len(idx), 1)), np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (len(idx), 1)), indices=idx)
+            view.set_velocities(np.zeros((len(idx), 3), dtype=np.float32), np.zeros((len(idx), 3), dtype=np.float32), indices=idx)
 
         def jig_matrix(att, joint):
-            """link -> world matrix of a carrier (a jig pair of the conveyor): the base of the machine (fixed: its USD pose is right) and the joint (prismatic along carriers.axis)
-            from the MEASURED joint position: the physics result is not written back to the USD stage, so the pose of a moving link in USD is the one of the start"""
             mc = att["mc"]
             if att.get("B") is None:
                 root = omni.usd.get_context().get_stage().GetPrimAtPath(mc["root"])
@@ -1746,7 +1972,6 @@ def main():
             return T * att["B"]
 
         def pile_view():
-            """the ONE physics view of all plates of the pile (the one of refine_target): a new RigidPrim per call would add a tensor view (and its GPU buffers) every cycle"""
             st_ = omni.usd.get_context().get_stage()
             pile = st_.GetPrimAtPath("/World/pile")
             paths = [str(c.GetPath()) for c in pile.GetChildren()] if pile.IsValid() else []
@@ -1763,7 +1988,7 @@ def main():
                 return
             pos_, quat_ = view.get_world_poses()
             pn, qn = pos_.numpy(), quat_.numpy()
-            jig_matrix(att, att["mc"]["carriers"]["node"].joints[0])           # (sets att["B"], the base of the machine in the world)
+            jig_matrix(att, att["mc"]["carriers"]["node"].joints[0])
             Binv, name = att["B"].GetInverse(), att["mc"]["mname"]
             (x0, x1), (y0, y1), (z0, z1) = ([float(v) for v in r] for r in att["cfg"]["remove_box_m"])
             gone = []
@@ -1775,54 +2000,271 @@ def main():
                 if not (x0 < x < x1 and y0 < y < y1 and z0 < z < z1):
                     continue
                 att["bound"][path] = name
-                part = st_.GetPrimAtPath(path)
-                for q_ in Usd.PrimRange(part):
-                    if q_.HasAPI(UsdPhysics.CollisionAPI):
-                        UsdPhysics.CollisionAPI(q_).CreateCollisionEnabledAttr(False)
-                set_click_physx(part, False)
-                PhysxSchema.PhysxRigidBodyAPI.Apply(part).CreateDisableGravityAttr(True)
-                UsdGeom.Imageable(part).MakeInvisible()
-                note(path, f"removed on {name}: hidden, collider off, parked")
-                refined.pop(path, None)
-                refined_at.pop(path, None)
-                if path in stiff_order:
-                    stiff_order.remove(path)
+                rides.pop(path, None)
+                retire(st_, path, f"removed on {name}: hidden, collider off, parked")
                 gone.append(i)
             if not gone:
                 print(f"[INFO] {name}: no part above it (attach.remove_box_m)", flush=True)
             if gone:
-                view.set_world_poses(np.tile(np.array(PARK, dtype=np.float32), (len(gone), 1)), np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (len(gone), 1)), indices=gone)
-                view.set_velocities(np.zeros((len(gone), 3), dtype=np.float32), np.zeros((len(gone), 3), dtype=np.float32), indices=gone)
+                park(view, gone)
                 print(f"[INFO] {len(gone)} part(s) on the jigs of {name} removed from the simulation, {len(att['bound'])} in all", flush=True)
+
+        grip_holds = {}
+        grip_views = {}
+
+        def grip_view(path):
+            if path not in grip_views:
+                grip_views[path] = RigidPrim(path)
+            return grip_views[path]
+
+        def grip_release(k, u, why, regrip):
+            h = grip_holds.pop(k, None)
+            if h is None:
+                return
+            if regrip:
+                u["node"].regrip()
+            print(f"[INFO] grip hold: {h['path'].rsplit('/', 1)[-1]} let go of ({why})", flush=True)
+
+        def grip_hold(k, u, cfg, jaw):
+            lo, hi = (float(v) for v in cfg.get("stroke_m", [-1.0, 1.0]))
+            if not lo <= jaw <= hi:
+                print(f"[INFO] grip hold: the jaws stopped at {jaw * 1000:.1f} mm, outside {lo * 1000:.1f}..{hi * 1000:.1f} mm: no grip, nothing held", flush=True)
+                return
+            st_ = omni.usd.get_context().get_stage()
+            r = u["r"]
+            jp = next((q for q in st_.Traverse() if q.GetName() == r["gripper_joints"][0] and q.IsA(UsdPhysics.Joint) and str(q.GetPath()).startswith(r["prim"] + "/")), None)
+            body0 = UsdPhysics.Joint(jp).GetBody0Rel().GetTargets() if jp else []
+            view, paths = pile_view()
+            if not body0 or view is None:
+                print("[WARN] grip hold: no palm body of the gripper joint / no parts: nothing held", flush=True)
+                return
+            palm = str(body0[0])
+            p0, q0 = (a.numpy()[0] for a in grip_view(palm).get_world_poses())
+            R0 = quat_to_mat(q0)
+            tcp = np.zeros(3)
+            for j in ET.parse(r["urdf"]).getroot().findall("joint"):
+                if "tcp" in j.find("child").get("link") and j.find("parent").get("link") == palm.rsplit("/", 1)[-1] and j.find("origin") is not None:
+                    tcp = np.array([float(v) for v in j.find("origin").get("xyz", "0 0 0").split()])
+            pos, quat = (a.numpy() for a in view.get_world_poses())
+            d = np.linalg.norm(pos - (p0 + R0 @ tcp), axis=1)
+            i = int(np.argmin(d))
+            radius = float(cfg.get("radius_m", 0.04))
+            if d[i] > radius:
+                print(f"[INFO] grip hold: no part within {radius * 100:.0f} cm of the TCP (nearest {d[i] * 100:.1f} cm): nothing held", flush=True)
+                return
+            grip_holds[k] = {"path": paths[i], "palm": palm, "rel_p": R0.T @ (pos[i] - p0), "rel_R": R0.T @ quat_to_mat(quat[i])}
+            u["node"].hold_gripper()
+            print(f"[INFO] grip hold: {paths[i].rsplit('/', 1)[-1]} ({d[i] * 100:.1f} cm from the TCP, jaws at {jaw * 1000:.1f} mm) is one body with the hand now", flush=True)
+
+        kin_roots = tuple(f"/World/machines/{mc['mname']}/" for mc in machines if isinstance(mc["art"], KinArticulation))
+
+        def palm_state(path):
+            if path.startswith(kin_roots):
+                T = UsdGeom.Xformable(omni.usd.get_context().get_stage().GetPrimAtPath(path)).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                return np.array(T.ExtractTranslation(), float), np.array(T.ExtractRotationMatrix(), float).T, np.zeros(3), np.zeros(3)
+            p0, q0 = (a.numpy()[0] for a in grip_view(path).get_world_poses())
+            lin, ang = (a.numpy()[0] for a in grip_view(path).get_velocities())
+            return p0, quat_to_mat(q0), lin, ang
+
+        def carry(h):
+            view, paths = pile_view()
+            if view is None or h["path"] not in paths:
+                return False
+            p0, R0, lin, ang = palm_state(h["palm"])
+            at = p0 + R0 @ h["rel_p"]
+            idx = [paths.index(h["path"])]
+            view.set_world_poses(at[None].astype(np.float32), mat_to_quat(R0 @ h["rel_R"])[None].astype(np.float32), indices=idx)
+            view.set_velocities((lin + np.cross(ang, at - p0))[None].astype(np.float32), ang[None].astype(np.float32), indices=idx)
+            return True
+
+        def grip_step():
+            for k, u in enumerate(units):
+                cfg = u["r"].get("grip_hold")
+                while u["node"].grip_events:
+                    ev = u["node"].grip_events.popleft()
+                    if ev[0] == "command":
+                        grip_release(k, u, "gripper command", False)
+                    elif ev[0] == "corner" and ev[1] and str((cfg or {}).get("release", "corner")).lower() == "corner":
+                        grip_release(k, u, "last corner of the path: the jaws press on it again", True)
+                    elif ev[0] == "near" and str((cfg or {}).get("release", "corner")).lower() == "near":
+                        grip_release(k, u, "the arm is within 0.03 rad of the end of the path", False)
+                    elif ev[0] == "done" and cfg and ev[3] == "blocked" and (ev[1] > 0.5) == (str(cfg.get("when", "open")).lower() == "open"):
+                        grip_hold(k, u, cfg, ev[2])
+                h = grip_holds.get(k)
+                if h is not None and not carry(h):
+                    grip_holds.pop(k, None)
+
+        vac_holds, vac_req, vac_result = {}, deque(), {}
+        rides, ride_links = {}, {}
+        for k, u in enumerate(units):
+            vc = u["r"].get("vacuum")
+            if vc:
+                vtopic = str(vc.get("topic") or "/vacuum/command")
+                u["node"].create_subscription(Bool, vtopic, lambda m, k=k: vac_req.append((k, bool(m.data))), 10)
+                vac_result[k] = u["node"].create_publisher(String, f"{vtopic}/result", 10)
+                print(f"[INFO] vacuum of {u['r']['name']}: {vtopic} (std_msgs/Bool) true = suction on, false = off; answer on {vtopic}/result (held | empty | released)", flush=True)
+
+        def vacuum_on(k, u, vc):
+            r = u["r"]
+            st_ = omni.usd.get_context().get_stage()
+            body = next((q for q in st_.Traverse() if q.GetName() == vc["body"] and str(q.GetPath()).startswith(r["prim"] + "/")), None)
+            view, paths = pile_view()
+            if body is None or view is None:
+                print(f"[WARN] vacuum: no body {vc['body']} under {r['prim']} / no parts: nothing held", flush=True)
+                return "empty"
+            palm = str(body.GetPath())
+            p0, q0 = (a.numpy()[0] for a in grip_view(palm).get_world_poses())
+            R0 = quat_to_mat(q0)
+            T = np.linalg.inv(urdf_link_pose(r["urdf"], vc["body"], {}, np.eye(4))) @ urdf_link_pose(r["urdf"], vc["tcp_link"], {}, np.eye(4))
+            tcp = p0 + R0 @ T[:3, 3]
+            pos, quat = (a.numpy() for a in view.get_world_poses())
+            taken = bound_parts() | {h["path"] for h in grip_holds.values()} | set(rides)
+            d = np.linalg.norm(pos - tcp, axis=1)
+            d[[i for i, p_ in enumerate(paths) if p_ in taken]] = np.inf
+            i = int(np.argmin(d))
+            radius = float(vc.get("radius_m", 0.05))
+            if d[i] > radius:
+                print(f"[INFO] vacuum: no part within {radius * 100:.0f} cm of the TCP (nearest {d[i] * 100:.1f} cm): nothing held", flush=True)
+                return "empty"
+            part = st_.GetPrimAtPath(paths[i])
+            if UsdPhysics.RigidBodyAPI(part).GetKinematicEnabledAttr().Get():
+                sw = next((s_ for s_ in switch if paths[i] in s_["parts"]), None)
+                if sw is not None and not sw["on"]:
+                    switch_crate(sw, True)
+                else:
+                    set_colliders(part, True)
+                    UsdPhysics.RigidBodyAPI(part).CreateKinematicEnabledAttr(False)
+            vac_holds[k] = {"path": paths[i], "palm": palm, "rel_p": R0.T @ (pos[i] - p0), "rel_R": R0.T @ quat_to_mat(quat[i]), "fresh": True}
+            set_colliders(part, False)
+            print(f"[INFO] vacuum: {paths[i].rsplit('/', 1)[-1]} ({d[i] * 100:.1f} cm from the TCP) sucked on", flush=True)
+            return "held"
+
+        def attach_on_release(h, cfg):
+            st_ = omni.usd.get_context().get_stage()
+            view, paths = pile_view()
+            if view is None or h["path"] not in paths:
+                return None
+            links_key = tuple(str(q) for q in cfg.get("links", []))
+            if links_key not in ride_links:
+                rx = [re.compile(q) for q in links_key]
+                ride_links[links_key] = [str(q.GetPath()) for q in st_.Traverse() if q.HasAPI(UsdPhysics.RigidBodyAPI) and any(r.fullmatch(q.GetName()) for r in rx)]
+            i = paths.index(h["path"])
+            pos, quat = (a.numpy()[i] for a in view.get_world_poses())
+            best = None
+            for link in ride_links[links_key]:
+                p0 = grip_view(link).get_world_poses()[0].numpy()[0]
+                d = float(np.linalg.norm(pos - p0))
+                if d < float(cfg.get("radius_m", 0.1)) and (best is None or d < best[0]):
+                    best = (d, link)
+            if best is None:
+                return None
+            p0, q0 = (a.numpy()[0] for a in grip_view(best[1]).get_world_poses())
+            R0 = quat_to_mat(q0)
+            rides[h["path"]] = {"path": h["path"], "palm": best[1], "rel_p": R0.T @ (pos - p0), "rel_R": R0.T @ quat_to_mat(quat)}
+            return best[1].rsplit("/", 1)[-1]
+
+        def vacuum_step():
+            while vac_req:
+                k, on = vac_req.popleft()
+                vc = units[k]["r"]["vacuum"]
+                try:
+                    if on:
+                        state = "held" if k in vac_holds else vacuum_on(k, units[k], vc)
+                    else:
+                        h = vac_holds.pop(k, None)
+                        state = "released" if h else "empty"
+                        link = attach_on_release(h, vc["attach_on_release"]) if h and vc.get("attach_on_release") else None
+                        if h and not link:
+                            set_colliders(omni.usd.get_context().get_stage().GetPrimAtPath(h["path"]), True)
+                        print(f"[INFO] vacuum: {h['path'].rsplit('/', 1)[-1] + (' stays on ' + link + ' (follows it, no collider)' if link else ' let go of') if h else 'off, nothing was held'}", flush=True)
+                except Exception as e:
+                    print(f"[WARN] vacuum {'on' if on else 'off'}: {type(e).__name__}: {e}", flush=True)
+                    state = "empty"
+                vac_result[k].publish(String(data=state))
+            for k, h in list(vac_holds.items()):
+                if h.pop("fresh", False):
+                    continue
+                if not carry(h):
+                    vac_holds.pop(k)
+            for path, h in list(rides.items()):
+                if not carry(h):
+                    rides.pop(path)
+
+        def cup_link(mc, name):
+            st_ = omni.usd.get_context().get_stage()
+            return next((str(q.GetPath()) for q in st_.Traverse() if q.GetName() == name and str(q.GetPath()).startswith(f"/World/machines/{mc['mname']}/")), None)
+
+        def cup_hold(mc, cup, vc):
+            view, paths = pile_view()
+            palm = cup_link(mc, cup)
+            if view is None or palm is None:
+                return None
+            p0, R0, _, _ = palm_state(palm)
+            pos, quat = (a.numpy() for a in view.get_world_poses())
+            d = np.linalg.norm(pos - p0, axis=1)
+            taken = bound_parts() | {h["path"] for h in grip_holds.values()} | {h["path"] for h in vac_holds.values()}
+            d[[i for i, p_ in enumerate(paths) if p_ in taken]] = np.inf
+            i = int(np.argmin(d))
+            if d[i] > float(vc.get("radius_m", 0.05)):
+                print(f"[INFO] {mc['mname']}: no part within {float(vc.get('radius_m', 0.05)) * 100:.0f} cm of {cup} (nearest {d[i] * 100:.1f} cm): nothing held", flush=True)
+                return None
+            rides.pop(paths[i], None)
+            set_colliders(omni.usd.get_context().get_stage().GetPrimAtPath(paths[i]), False)
+            print(f"[INFO] {mc['mname']}: {paths[i].rsplit('/', 1)[-1]} ({d[i] * 100:.1f} cm from {cup}) sucked on", flush=True)
+            return {"path": paths[i], "palm": palm, "rel_p": R0.T @ (pos[i] - p0), "rel_R": R0.T @ quat_to_mat(quat[i]), "fresh": True}
+
+        def machine_vacuum_step():
+            for mc in machines:
+                vc = mc["m"].get("vacuum")
+                node_ = mc["node"]
+                if not vc or not node_.vacuum_req:
+                    continue
+                while node_.vacuum_req:
+                    mask = node_.vacuum_req.popleft()
+                    for i, cup in enumerate(vc["cups"]):
+                        key = (mc["mname"], i)
+                        try:
+                            if mask >> i & 1 and key not in vac_holds:
+                                h = cup_hold(mc, cup, vc)
+                                if h:
+                                    vac_holds[key] = h
+                            elif not mask >> i & 1 and key in vac_holds:
+                                h = vac_holds.pop(key)
+                                link = attach_on_release(h, vc["attach_on_release"]) if vc.get("attach_on_release") else None
+                                if not link:
+                                    UsdPhysics.RigidBodyAPI(omni.usd.get_context().get_stage().GetPrimAtPath(h["path"])).CreateKinematicEnabledAttr(True)
+                                print(f"[INFO] {mc['mname']}: {h['path'].rsplit('/', 1)[-1] + (' stays on ' + link + ' (follows it, no collider)' if link else ' put down where it is (no jig within attach_on_release.radius_m): kinematic, no collider')}", flush=True)
+                        except Exception as e:
+                            print(f"[WARN] {mc['mname']} {cup}: {type(e).__name__}: {e}", flush=True)
+                node_.vacuum_pub.publish(Int32(data=sum(1 << i for i in range(len(vc["cups"])) if (mc["mname"], i) in vac_holds)))
 
         def attach_step():
             for att in attaches:
                 try:
-                    if att["mc"]["node"].attach_requests:                  # trigger_topic of the machine yaml: the hands are about to let go over its jigs
+                    if att["mc"]["node"].attach_requests:
                         att["mc"]["node"].attach_requests.clear()
-                        att["due"] = timeline.get_current_time() + float(att["cfg"].get("delay_s", 0.0))   # simulated time
+                        att["due"] = timeline.get_current_time() + float(att["cfg"].get("delay_s", 0.0))
                     if att.get("due") is not None and timeline.get_current_time() >= att["due"]:
                         att["due"] = None
                         attach_parts(att)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"[WARN] attach to {att['mc']['mname']}: {type(e).__name__}: {str(e)[:100]}", flush=True)
 
-        watchers = [mc for mc in machines if mc["m"].get("hands") or mc["m"].get("part_pose")]   # machines that look at the parts (hands: / part_pose: of their yaml)
+        watchers = [mc for mc in machines if mc["m"].get("hands") or mc["m"].get("part_pose")]
 
         def watch_machine(mc, pn, qn):
-            """for a machine with hands: / part_pose: in its yaml (positions in the frame of the machine): a bit per hand pair when a part (z in the range) lies within radius_m of
-            the carrier slot in front of that pair (hands.topic), and the pose of the part nearest to the seat within radius_m (part_pose.topic; none there: nothing is published)"""
             m = mc["m"]
             pose = (m.get("pos_m") or [0, 0, 0], m.get("rpy_deg") or [0, 0, 0])
             hands = m.get("hands") or {}
             if hands and mc["node"].hands_pub is not None:
                 car = m.get("carriers") or {}
                 ax = [float(v) for v in car.get("axis", [1, 0, 0])]
+                o = [float(v) for v in hands.get("origin_m", [0.0, 0.0, 0.0])]
                 zlo, zhi = (float(v) + float(pose[0][2]) for v in hands.get("z_m", [0.9, 1.2]))
                 mask = 0
                 for i, k in enumerate(hands.get("slots") or []):
                     at = float(car["slots_m"][int(k)])
-                    hx, hy, _ = sim_config.to_world(pose, [ax[0] * at, ax[1] * at, ax[2] * at])
+                    hx, hy, _ = sim_config.to_world(pose, [o[0] + ax[0] * at, o[1] + ax[1] * at, o[2] + ax[2] * at])
                     if np.any((np.hypot(pn[:, 0] - hx, pn[:, 1] - hy) < float(hands.get("radius_m", 0.03))) & (pn[:, 2] > zlo) & (pn[:, 2] < zhi)):
                         mask |= 1 << i
                 mc["node"].hands_pub.publish(Int32(data=int(mask)))
@@ -1836,11 +2278,10 @@ def main():
                     mc["node"].publish_part_pose(pn[k], qn[k])
 
         stat = {"t": time.time(), "f": 0, "sim": timeline.get_current_time()}
-        BOOM_SPEED = 2.0                                       # m/s: a plate this fast is thrown (the pile settles at < 0.1 m/s, an arm carries a plate at ~1 m/s: those are not looked at)
+        BOOM_SPEED = 2.0
         boom = {"t": 0.0, "seen": {}, "n": 0}
 
         def boom_step():
-            """10 times a second: a plate that moves faster than BOOM_SPEED (and is not in the gripper) is written down with everything that was done to it / around it just before"""
             now = time.time()
             if now - boom["t"] < 0.1 or part_view[0] is None or boom["n"] >= 40:
                 return
@@ -1852,7 +2293,7 @@ def main():
                 if not len(fast):
                     return
                 pos = part_view[0].get_world_poses()[0].numpy()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return
             for i in fast[:3]:
                 path = part_view[1][int(i)]
@@ -1867,7 +2308,6 @@ def main():
                       f"collider events: {ev} | robot: {rb}", flush=True)
 
         def stat_step():
-            """every 30 s one line: how the frame rate and the memory of this process change while the sim runs (is it a leak or the physics that gets heavier?)"""
             now = time.time()
             if now - stat["t"] < 30.0:
                 return
@@ -1876,11 +2316,18 @@ def main():
             per_frame = (sim_now - stat["sim"]) / max(1, node.frame - stat["f"])
             stat["t"], stat["f"], stat["sim"] = now, node.frame, sim_now
             rss = int(open("/proc/self/statm").read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1e6
-            print(f"[STAT] {fps:5.1f} fps ({per_frame * 1000:.1f} ms of simulated time per frame), rss {rss:6.0f} MB, fine collider {len(refined)}, stiff {len(stiff_order)}, removed on a jig {len(bound_parts())}", flush=True)
+            moving = ""
+            try:
+                view_, _ = pile_view()
+                sp = np.linalg.norm(view_.get_velocities()[0].numpy(), axis=1) if view_ is not None else np.zeros(0)
+                mv = sp[sp > 0.0005]
+                moving = f", parts moving {len(mv)} of {len(sp)}" + (f" (median {np.median(mv) * 1000:.1f} mm/s, 95 % {np.percentile(mv, 95) * 1000:.1f} mm/s)" if len(mv) else "")
+            except Exception:
+                pass
+            print(f"[STAT] {fps:5.1f} fps ({per_frame * 1000:.1f} ms of simulated time per frame), rss {rss:6.0f} MB, fine collider {len(refined)}, stiff {len(stiff_order)}, removed {len(bound_parts())}{moving}", flush=True)
 
-        # pallets.physics `switch: true` (a layer of the map): one crate of the layer at a time has physics (its collider, its parts free); the others are only to look at
-        # (no collider, parts kinematic). /crate_active (pallets.switch_topic; std_msgs/String json {"centre": [x, y]}, vision_pick.py: the crate it picks from now) switches
-        switch, switch_req = [], deque()
+        switch, switch_req, clear_req, cleared = [], deque(), deque(), set()
+        parts_req, parts_pub, remove_req = deque(), None, deque()
         if robot.get("pallets") and robot["pallets"].get("plan") and any(len(v) > 2 and v[2] for v in (robot.get("pallet_physics") or {}).values()):
             pc_ = robot["pallets"]
             pname_ = (pc_.get("part_cfg") or {}).get("name", "part")
@@ -1892,47 +2339,43 @@ def main():
                                    "crate": f"/World/pallets/pallet_{c['pallet']}/L{c['layer']}_C{c['idx']}/crate",
                                    "parts": [f"/World/pile/{pname_}_p{p['pallet']}_L{p['layer']}_C{p['crate']}_{p['j']:02d}" for p in pc_["plan"]["parts"]
                                              if (p["pallet"], p["layer"], p["crate"]) == (c["pallet"], c["layer"], c["idx"])]})
-            r_in = math.hypot(*[float(v) for v in pc_["crate"]["inner_size_m"][:2]]) / 2.0     # a part this close to the crate centre (x y) still lies in it
+            r_in = math.hypot(*[float(v) for v in pc_["crate"]["inner_size_m"][:2]]) / 2.0
             topic = str(pc_.get("switch_topic") or "/crate_active")
             node.create_subscription(String, topic, lambda m: switch_req.append(m.data), 10)
+            node.create_subscription(String, str(pc_.get("clear_topic") or "/crate_clear"), lambda m: clear_req.append(m.data), 10)
+            parts_pub = node.create_publisher(String, str(pc_.get("parts_topic") or "/crate_parts"), 10)
+            node.create_subscription(String, str(pc_.get("parts_request_topic") or "/crate_parts_request"), lambda m: parts_req.append(m.data), 10)
+            node.create_subscription(String, str(pc_.get("parts_remove_topic") or "/crate_parts_remove"), lambda m: remove_req.append(m.data), 10)
             print(f"[INFO] pallets: {len(switch)} crates switched one at a time ({sum(sw['on'] for sw in switch)} on now) from {topic}", flush=True)
 
-        def switch_crate(sw, on):
-            """physics of one crate of a switch layer: its collider, and its parts (on = free with collider; off = kinematic without collider, only the ones still in it)"""
+        def switch_crate(sw, on, quiet=False):
             st_ = omni.usd.get_context().get_stage()
-            for q in Usd.PrimRange(st_.GetPrimAtPath(sw["crate"])):
-                if q.HasAPI(UsdPhysics.CollisionAPI):
-                    UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(on)
+            set_colliders(st_.GetPrimAtPath(sw["crate"]), on)
             pos, gone, n = pile_positions(), bound_parts(), 0
             for path in sw["parts"]:
                 at = pos.get(path)
                 if path in gone or (not on and (at is None or math.hypot(at[0] - sw["pos"][0], at[1] - sw["pos"][1]) > r_in or abs(at[2] - sw["pos"][2]) > 0.3)):
-                    continue                                                 # removed, or (off) picked and carried away: left alone. On: every part of it (frozen since the start)
+                    continue
                 part = st_.GetPrimAtPath(path)
                 if not on:
-                    set_click_physx(part, False)                             # CCD off before it is kinematic
-                for q in Usd.PrimRange(part):
-                    if q.HasAPI(UsdPhysics.CollisionAPI):
-                        UsdPhysics.CollisionAPI(q).CreateCollisionEnabledAttr(on)
+                    set_click_physx(part, False)
+                set_colliders(part, on)
                 UsdPhysics.RigidBodyAPI(part).CreateKinematicEnabledAttr(not on)
                 n += 1
             sw["on"] = on
-            print(f"[INFO] {sw['name']}: physics {'on' if on else 'off'} (the crate and {n} part(s))", flush=True)
+            if not quiet:
+                print(f"[INFO] {sw['name']}: physics {'on' if on else 'off'} (the crate and {n} part(s))", flush=True)
 
-        taken = set()        # (pallet, layer) taken away: the layers above the crate that has the physics now
+        taken = set()
 
         def take_away(pallet, layer):
-            """a layer that is done (the robot works in the layer below it now): its crates and the parts left in them are hidden and lose their colliders
-            (a deleted prim would restart the physics); the moving parts that are still in it are frozen too"""
             st_ = omni.usd.get_context().get_stage()
             root = st_.GetPrimAtPath(f"/World/pallets/pallet_{pallet}")
             n = 0
             for q in (root.GetChildren() if root.IsValid() else []):
-                if q.GetName().startswith(f"L{layer}_"):                   # the crate frames L<layer>_C<i> and the fixed parts L<layer>_C<i>_<part>_<j>
+                if q.GetName().startswith(f"L{layer}_"):
                     UsdGeom.Imageable(q).MakeInvisible()
-                    for c in Usd.PrimRange(q):
-                        if c.HasAPI(UsdPhysics.CollisionAPI):
-                            UsdPhysics.CollisionAPI(c).CreateCollisionEnabledAttr(False)
+                    set_colliders(q, False)
                     n += 1
             for sw in switch:
                 if (sw["pallet"], sw["layer"]) == (pallet, layer):
@@ -1942,9 +2385,7 @@ def main():
                         part = st_.GetPrimAtPath(path)
                         if part.IsValid() and path not in bound_parts():
                             UsdGeom.Imageable(part).MakeInvisible()
-                            for c in Usd.PrimRange(part):
-                                if c.HasAPI(UsdPhysics.CollisionAPI):
-                                    UsdPhysics.CollisionAPI(c).CreateCollisionEnabledAttr(False)
+                            set_colliders(part, False)
             taken.add((pallet, layer))
             print(f"[INFO] pallet {pallet} layer {layer} is done: taken away ({n} crates / parts hidden, no colliders)", flush=True)
 
@@ -1954,7 +2395,7 @@ def main():
                 try:
                     msg = json.loads(raw)
                     cx, cy = (float(v) for v in msg["centre"][:2])
-                    fz = msg.get("floor_z")                                 # the floor of the crate: which layer of the stack (the centre is the same in every layer)
+                    fz = msg.get("floor_z")
                     floor = float(robot["pallets"]["crate"]["floor_z_m"])
 
                     def off(sw):
@@ -1971,54 +2412,177 @@ def main():
                             switch_crate(sw, False)
                     if not target["on"]:
                         switch_crate(target, True)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"[WARN] /crate_active {raw}: {type(e).__name__}: {e}", flush=True)
 
-        cam_req = deque()    # cameras: of the map: the ones asked for a picture (/<name>/capture)
+        def clear_step():
+            while clear_req:
+                raw = clear_req.popleft()
+                try:
+                    msg = json.loads(raw)
+                    cx, cy = (float(v) for v in msg["centre"][:2])
+                    fz = msg.get("floor_z")
+                    floor = float(robot["pallets"]["crate"]["floor_z_m"])
+
+                    def off(sw):
+                        return math.hypot(sw["pos"][0] - cx, sw["pos"][1] - cy) + (abs(sw["pos"][2] + floor - float(fz)) if fz is not None else 0.0)
+                    target = min(switch, key=off)
+                    if off(target) > 0.2:
+                        print(f"[WARN] /crate_clear {raw}: no switched crate there", flush=True)
+                        continue
+                    cleared.add(target["name"])
+                    same = [sw for sw in switch if (sw["pallet"], sw["layer"]) == (target["pallet"], target["layer"])]
+                    if (target["pallet"], target["layer"]) not in taken and all(sw["name"] in cleared for sw in same):
+                        take_away(target["pallet"], target["layer"])
+                except Exception as e:
+                    print(f"[WARN] /crate_clear {raw}: {type(e).__name__}: {e}", flush=True)
+
+        def parts_step():
+            while parts_req:
+                raw = parts_req.popleft()
+                try:
+                    msg = json.loads(raw)
+                    cx, cy = (float(v) for v in msg["centre"][:2])
+                    fz = msg.get("floor_z")
+                    floor = float(robot["pallets"]["crate"]["floor_z_m"])
+
+                    def off(sw):
+                        return math.hypot(sw["pos"][0] - cx, sw["pos"][1] - cy) + (abs(sw["pos"][2] + floor - float(fz)) if fz is not None else 0.0)
+                    target = min(switch, key=off)
+                    if off(target) > 0.2:
+                        print(f"[WARN] /crate_parts_request {raw}: no switched crate there", flush=True)
+                        continue
+                    view, paths = pile_view()
+                    out = []
+                    if view is not None:
+                        pos_, quat_ = view.get_world_poses()
+                        pn, qn = pos_.numpy(), quat_.numpy()
+                        row, gone = {p_: i_ for i_, p_ in enumerate(paths)}, bound_parts()
+                        for path in target["parts"]:
+                            i = row.get(path)
+                            if i is None or path in gone:
+                                continue
+                            x, y, z = (float(v) for v in pn[i])
+                            if math.hypot(x - target["pos"][0], y - target["pos"][1]) > r_in or abs(z - target["pos"][2]) > 0.3:
+                                continue
+                            qw, qx, qy, qz = (float(v) for v in qn[i])
+                            roll, pitch, yaw = Gf.Rotation(Gf.Quatd(qw, Gf.Vec3d(qx, qy, qz))).Decompose(Gf.Vec3d.XAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.ZAxis())
+                            if units[0]["r"].get("vacuum"):
+                                tcp_r, tcp_p, tcp_y, flipped = vacuum_tcp(qw, qx, qy, qz)
+                            else:
+                                tcp_r, tcp_p, tcp_y, flipped = grasp_tcp.tcp_rpy(roll, pitch, yaw)
+                            state = "turn_over" if flipped else "standard"
+                            flat = abs(1.0 - 2.0 * (qx * qx + qy * qy))
+                            out.append({"path": path, "xyz_m": [x, y, z], "state": state, "flat": flat, "tilt_deg": math.degrees(math.acos(min(1.0, flat))),
+                                        "ee_6d": f"{x:.4f} {y:.4f} {z:.4f} {tcp_r + 0.0:.1f} {tcp_p + 0.0:.1f} {tcp_y + 0.0:.2f} {state}"})
+                    parts_pub.publish(String(data=json.dumps({"index": msg.get("index"), "parts": out})))
+                    print(f"[INFO] {target['name']}: {len(out)} part(s) in the crate sent to /crate_parts ({sum(p_['state'] == 'turn_over' for p_ in out)} turned over)", flush=True)
+                except Exception as e:
+                    print(f"[WARN] /crate_parts_request {raw}: {type(e).__name__}: {e}", flush=True)
+
+        def remove_step():
+            while remove_req:
+                raw = remove_req.popleft()
+                try:
+                    msg = json.loads(raw)
+                    pts, radius = np.array(msg["xyz_m"], dtype=float).reshape(-1, 3), float(msg.get("radius_m", 0.08))
+                    view, paths = pile_view()
+                    if view is None:
+                        continue
+                    pn, st_ = view.get_world_poses()[0].numpy(), omni.usd.get_context().get_stage()
+                    keep = bound_parts() | {h["path"] for h in grip_holds.values()}
+                    out = [i for i, p_ in enumerate(pn) if paths[i] not in keep and np.linalg.norm(pts - p_, axis=1).min() < radius]
+                    for i in out:
+                        retire(st_, paths[i], "removed at a place pose: hidden, collider off, parked")
+                        removed.add(paths[i])
+                        rides.pop(paths[i], None)
+                    if out:
+                        park(view, out)
+                    print(f"[INFO] /crate_parts_remove: {len(out)} part(s) within {radius * 100:.0f} cm of the place poses removed from the simulation, {len(removed)} in all", flush=True)
+                except Exception as e:
+                    print(f"[WARN] /crate_parts_remove {raw}: {type(e).__name__}: {e}", flush=True)
+
+        cam_req = deque()
         for c in robot.get("cameras") or []:
             node.create_subscription(Empty, f"/{c['name']}/capture", lambda _, c=c: cam_req.append(c), 10)
 
+        settle_s = float((robot.get("pallets") or {}).get("settle_s", 0.0))
+        if settle_s > 0:
+            t_settle, frames, quiet = time.time(), 0, 0
+            at_start = {sw["name"]: sw["on"] for sw in switch}
+            for sw in switch:
+                if not sw["on"]:
+                    switch_crate(sw, True, quiet=True)
+            print(f"[INFO] letting the pile settle (up to {settle_s:g} s of simulated time, ends as soon as nothing moves)"
+                  + (f", all {len(switch)} switched crates with physics on meanwhile" if switch else "") + " ...", flush=True)
+            while simulation_app.is_running() and frames < int(settle_s * APP_HZ):
+                update(1)
+                frames += 1
+                if frames % 30 == 0:
+                    try:
+                        view_, _ = pile_view()
+                        if view_ is None:
+                            break
+                        quiet = 0 if (np.linalg.norm(view_.get_velocities()[0].numpy(), axis=1) > 0.0005).any() else quiet + 1
+                    except Exception:
+                        break
+                    if quiet >= 2:
+                        break
+            print(f"[INFO] the pile settled after {frames / APP_HZ:.1f} s of simulated time ({time.time() - t_settle:.0f} s)", flush=True)
+            for sw in switch:
+                if not at_start[sw["name"]]:
+                    switch_crate(sw, False, quiet=True)
+            if switch:
+                print(f"[INFO] the settled poses are frozen: physics of the {len(switch)} crates off again, a crate gets it back (SDF) when /crate_active names it", flush=True)
+
         while simulation_app.is_running():
             switch_step()
+            clear_step()
+            parts_step()
+            remove_step()
             if time.time() - fx_state["t"] > 1.0:
                 fx_state["t"] = time.time()
                 reload_fixtures()
             fixture_friction()
             attach_step()
+            grip_step()
+            vacuum_step()
+            machine_vacuum_step()
             stat_step()
             boom_step()
-            if watchers and time.time() - fx_state.get("tp", 0.0) > 0.2:     # 5 Hz: the machines that look at the parts (hands, the part on a seat)
+            if watchers and time.time() - fx_state.get("tp", 0.0) > 0.2:
                 fx_state["tp"] = time.time()
                 try:
-                    if fx_state.get("pile") is None:                       # all parts of the pile and the objects in one view
+                    if fx_state.get("pile") is None:
                         st_ = omni.usd.get_context().get_stage()
                         fx_state["pile"] = RigidPrim([str(q.GetPath()) for root_ in ("/World/pile", "/World/objects") if st_.GetPrimAtPath(root_).IsValid() for q in st_.GetPrimAtPath(root_).GetChildren()])
                     pos_, quat_ = fx_state["pile"].get_world_poses()
                     pn, qn = pos_.numpy(), quat_.numpy()
                     for mc in watchers:
                         watch_machine(mc, pn, qn)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     fx_state["pile"] = None
             for u in units:
-                u["cmd"] = u["cmd"] + np.clip(np.array(u["node"].targets(u["cmd"], u["step"])) - u["cmd"], -u["step"], u["step"])  # rate-limited towards the command
+                step = u["node"].ramp(u["cmd"], u["step_slow"] if u["node"].slow else u["step"])
+                u["cmd"] = u["node"].limit(u["cmd"], u["node"].targets(u["cmd"], step), step)
             try:
                 for u in units:
                     u["art"].set_dof_position_targets(u["cmd"])
                 for mc in machines:
                     target = mc["node"].targets()
-                    new = target != mc["last_target"]                                       # a new command: the move starts from where the joint really is (a joint that was held
-                    mc["cmd"] = np.where(new & ~mc["carrier"], mc["q"], mc["cmd"])          # against something has its command far ahead of it: no waiting, then a jump)
+                    new = target != mc["last_target"]
+                    mc["cmd"] = np.where(new & ~mc["carrier"], mc["q"], mc["cmd"])
                     mc["vel"] = np.where(new, 0.0, mc["vel"])
                     mc["last_target"] = target
-                    err = target - mc["cmd"]                                               # towards the commanded position on a velocity ramp
+                    err = target - mc["cmd"]
                     v_want = np.sign(err) * np.minimum(mc["step"] * APP_HZ, np.sqrt(2.0 * mc["acc"] * np.abs(err)))
                     mc["vel"] = mc["vel"] + np.clip(v_want - mc["vel"], -mc["acc"] / APP_HZ, mc["acc"] / APP_HZ)
                     mc["cmd"] = mc["cmd"] + np.clip(mc["vel"] / APP_HZ, -np.abs(err), np.abs(err))
-                    mc["cmd"] = np.where(mc["rot"], np.clip(mc["cmd"], mc["q"] - MACHINE_LEAD, mc["q"] + MACHINE_LEAD), mc["cmd"])    # a held rotor does not wind up
-                    if mc["carriers"]:                                        # the carriers follow the belt, not joint_command
+                    mc["cmd"] = np.where(mc["rot"], np.clip(mc["cmd"], mc["q"] - MACHINE_LEAD, mc["q"] + MACHINE_LEAD), mc["cmd"])
+                    if mc["carriers"]:
                         cr = mc["carriers"]
                         q = cr["node"].step(1.0 / APP_HZ)
-                        jumped = [i for i, (a, b) in zip(cr["idx"], zip(cr["last"], q)) if b - a > cr["node"].loop / 2]   # left at the -y end: placed at the +y end
+                        jumped = [i for i, (a, b) in zip(cr["idx"], zip(cr["last"], q)) if abs(b - a) > cr["node"].loop / 2]
                         if jumped:
                             mc["art"].set_dof_positions(np.array([[q[cr["idx"].index(i)] for i in jumped]]), dof_indices=jumped)
                             mc["art"].set_dof_velocities(np.zeros((1, len(jumped))), dof_indices=jumped)
@@ -2033,7 +2597,7 @@ def main():
                     mc["q"] = mc["art"].get_dof_positions().numpy()[0]
                     mc["node"].report(mc["q"], mc["art"].get_dof_velocities().numpy()[0])
                 rebuilds = 0
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 rebuilds += 1
                 if rebuilds > 3:
                     raise
@@ -2042,12 +2606,12 @@ def main():
             while clicked:
                 path = clicked.pop(0)
                 try:
-                    if not omni.usd.get_context().get_stage().GetPrimAtPath(path).IsValid():     # deleted while it was selected
+                    if not omni.usd.get_context().get_stage().GetPrimAtPath(path).IsValid():
                         views.pop(path, None)
                         continue
-                    if not path.startswith("/World/pallets/"):                   # a part that moves: exact collider for the fingers
+                    if not path.startswith("/World/pallets/"):
                         refine_collision(path)
-                    if path.startswith("/World/pallets/"):                       # static part: no physics view, the pose is in the stage
+                    if path.startswith("/World/pallets/"):
                         T = Gf.Transform(UsdGeom.Xformable(omni.usd.get_context().get_stage().GetPrimAtPath(path)).ComputeLocalToWorldTransform(Usd.TimeCode.Default()))
                         (x, y, z), q = T.GetTranslation(), T.GetRotation().GetQuat()
                         qw, (qx, qy, qz) = q.GetReal(), q.GetImaginary()
@@ -2056,48 +2620,51 @@ def main():
                         pos, quat = view.get_world_poses()
                         (x, y, z), (qw, qx, qy, qz) = pos.numpy()[0], quat.numpy()[0]
                     roll, pitch, yaw = Gf.Rotation(Gf.Quatd(float(qw), Gf.Vec3d(float(qx), float(qy), float(qz)))).Decompose(
-                        Gf.Vec3d.XAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.ZAxis())  # the Rotate X Y Z of the panel (checked against it)
+                        Gf.Vec3d.XAxis(), Gf.Vec3d.YAxis(), Gf.Vec3d.ZAxis())
                     print(f"{x:.3f} {y:.3f} {z:.3f} {roll + 0.0:.1f} {pitch + 0.0:.1f} {yaw + 0.0:.1f}", flush=True)
-                    tcp_r, tcp_p, tcp_y, flipped = grasp_tcp.tcp_rpy(roll, pitch, yaw)    # the line to paste into ee_6d.py: same x y z, the TCP angles that grip it, the state of the part
-                    print(f"{x:.3f} {y:.3f} {z:.3f} {tcp_r + 0.0:.1f} {tcp_p + 0.0:.1f} {tcp_y + 0.0:.1f} {'turn_over' if flipped else 'standard'}", flush=True)
+                    if units[0]["r"].get("vacuum"):
+                        tcp_r, tcp_p, tcp_y, flipped = vacuum_tcp(float(qw), float(qx), float(qy), float(qz))
+                    else:
+                        tcp_r, tcp_p, tcp_y, flipped = grasp_tcp.tcp_rpy(roll, pitch, yaw)
+                    print(f"{x:.4f} {y:.4f} {z:.4f} {tcp_r + 0.0:.1f} {tcp_p + 0.0:.1f} {tcp_y + 0.0:.2f} {'turn_over' if flipped else 'standard'}", flush=True)
                     for u in units:
                         u["node"].publish_turned_over(flipped)
                 except Exception as e:
                     print(f"[WARN] pose of {path} not available: {type(e).__name__}: {e}", flush=True)
             for u in units:
                 un, r = u["node"], u["r"]
-                while un.pictures:                                           # /vision_pick/picture: show the newest one in a window of Isaac Sim
+                while un.pictures:
                     path = un.pictures.popleft()
                     if not un.pictures and os.path.isfile(path):
                         try:
                             picture_panel.show(path)
-                        except Exception as e:  # noqa: BLE001
+                        except Exception as e:
                             print(f"[WARN] picture {path} not shown: {type(e).__name__}: {e}", flush=True)
-                while un.targets_seen:                                       # /target_pose: the part the robot goes to
+                while un.targets_seen:
                     pos = un.targets_seen.popleft()
                     try:
                         refine_target(pos)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         print(f"[WARN] part at the target {pos} not refined: {type(e).__name__}: {e}", flush=True)
-                if un.capture_requested.is_set():                            # /wrist_camera/capture
+                if un.capture_requested.is_set():
                     un.capture_requested.clear()
                     try:
                         if not r.get("wrist_camera_path"):
                             raise RuntimeError("no wrist camera: set `wrist_camera:` in the robot yaml (and the link in the URDF)")
-                        q_now = dict(zip(u["names"], (float(v) for v in u["art"].get_dof_positions().numpy()[0])))    # the measured joints = what the camera sees
+                        q_now = dict(zip(u["names"], (float(v) for v in u["art"].get_dof_positions().numpy()[0])))
                         T_base = make_T(rpy_to_mat(r.get("rpy_deg", [0, 0, 0])), r.get("pos_m", [0, 0, 0]))
                         f, valid = capture_wrist_camera(r["wrist_camera"], r["wrist_camera_path"],
                                                         urdf_link_pose(r["urdf"], str(r["wrist_camera"]["link"]), q_now, T_base))
                         print(f"[INFO] wrist camera frame -> {f} ({valid * 100:.0f} % of the pixels have depth)", flush=True)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         print(f"[WARN] wrist camera capture failed: {type(e).__name__}: {e}", flush=True)
-            while cam_req:                                                   # /<name>/capture of a fixed camera
+            while cam_req:
                 c = cam_req.popleft()
                 try:
                     f = capture_fixed_camera(c, c["path"])
                     print(f"[INFO] camera {c['name']} picture -> {f}", flush=True)
                     picture_panel.show(f)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     print(f"[WARN] camera {c['name']} capture failed: {type(e).__name__}: {e}", flush=True)
         timeline.stop()
     except KeyboardInterrupt:

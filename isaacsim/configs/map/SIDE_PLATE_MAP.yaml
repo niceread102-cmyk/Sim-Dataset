@@ -1,127 +1,89 @@
-# The side plate cell: the M20 on its stand, two pallets of crates with side plates, the laser marker and the conveyor.
-#   lab robot_sim.py map:=SIDE_PLATE_MAP [robot:=<robot>]          ros2 launch robot.launch.py map:=SIDE_PLATE_MAP [robot:=<robot>] [sequence:=true]
-# A map of its own: everything of the scene is in this file (the machines themselves are configs/machine/<name>.yaml). World = the Isaac Sim world (m).
-
-scene:                        # robot_sim.py: what stands around the robot; the launch, the sequence and the tools read the robot, its pose and the machines from here too
-  robot: m20_35_18d_mhzl2_20d  # the robot of this map (robot:=<name> on the command line wins). Robots = the files of configs/robot/ (made by make_robot_config.py)
-  robot_pose: [-0.0635, -0.0035, 1.1, 0, 0, 180]   # where the robot base stands in this map [x, y, z (m), roll, pitch, yaw (deg)] (pos_m / rpy_deg of the robot yaml are 0):
-                              # J1 axis at the centre of the 300 x 300 bolt square on the RobotStand of the map, z = the top of the stand: 1.0 m + 0.1 m of map_edits below
-  sequence: side_plate_test   # the sequence of this map (configs/sequence/<name>.yaml) that `sequence:=true` of the launch runs
-  map: SIDE_PLATE_MAP         # (SIDE_PLATE_MAP_light = the old light copy, no RobotStand) an environment made in the Isaac Sim GUI: a USD of assets/map/ (name or path); null = none.
-                              # Its top-level prims (not the render settings / viewport cameras / light rig its stage saved) go to /World/map; the colliders set in the GUI are used as they are
-  map_collision:              # the collision of parts of the map (robot_sim.py, at start; the map USD has them as made in the GUI): convexHull | convexDecomposition | meshSimplification | none (triangle mesh) | off (no collider)
-    - {prim: SIDE_PLATE_MAP/Pallet, collision: convexDecomposition, options: {max_hulls: 64, voxel_resolution: 1000000, error_percentage: 5.0}}   # the pallets (one mesh of 315 k faces): a hull put one slab over the floor between them; the decomposition keeps them apart. options as the machines have them; `off` = no collider (the cheapest), `convexHull` = one hull for both
-  map_edits:                  # parts of the map stretched in height (robot_sim.py, at start): every vertex of the meshes below `prim` above above_z_m moves up by dz_m
-    - {prim: SIDE_PLATE_MAP/RobotStand, above_z_m: 0.5, dz_m: 0.1}   # the stand of the robot: its four columns 100 mm longer, the top plate (and the robot on it) at 1.1 m = platform 1100 mm
-  pallets:                    # crates of parts stacked on the pallets of the map: remove this section = none (binsim/pallets.py)
-    seed: random              # random = a new random arrangement on every start (printed), a number = the same one every time
-    items:                    # the pallets that get crates: pos_m = centre of the deck at deck top height, yaw_deg (measured from the pallet mesh of
-      - {pos_m: [0.6582, 0.8168, 0.12], yaw_deg: 45}     # the map: 1.1 x 1.1 m, two of them on the +x side turned by 45 degrees)
-      - {pos_m: [0.6582, -0.8168, 0.12], yaw_deg: 45}
+# Map of the side plate cell: the M20 on its stand, two pallets of crates with side plates, the laser marker and the conveyor (robot pose, map USD, pallets, machines, cameras).
+# lab robot_sim.py map:=SIDE_PLATE_MAP   |   ros2 launch robot.launch.py map:=SIDE_PLATE_MAP [sequence:=true]
+scene:
+  robot: m20_35_18d_mhzl2_20d
+  robot_pose: [-0.0635, -0.0035, 1.1, 0, 0, 180]
+  sequence: side_plate_test
+  map: SIDE_PLATE_MAP
+  map_collision:
+    - {prim: SIDE_PLATE_MAP/Pallet, collision: convexDecomposition, options: {max_hulls: 64, voxel_resolution: 1000000, error_percentage: 5.0}}
+  map_edits:
+    - {prim: SIDE_PLATE_MAP/RobotStand, above_z_m: 0.5, dz_m: 0.1}
+  pallets:
+    seed: random
+    items:
+        # pallet 0
+      - {pos_m: [0.6582, 0.8168, 0.12], yaw_deg: 45, enabled: true}
+      
+        # pallet 1
+      - {pos_m: [0.6582, -0.8168, 0.12], yaw_deg: 45, enabled: true}
     crate:
-      usd: ../../../assets/object/usd/SIDE_PLATE_BOX_520x365x200mm.usd    # relative to this file: SIDE_PLATE_BOX.usd (made in the GUI, perforated crate) turned and stretched to 520 x 365 x 200 mm
-      size_m: [0.520, 0.365, 0.200]  # outer x y z, the long side is x
-      inner_size_m: [0.4516, 0.3042] # usable floor x y (the old 0.330 x 0.200 floor stretched with the crate)
-      floor_z_m: 0.0149              # top of the crate floor (old 0.0078 x 1.905)
-      collision: meshSimplification  # collision of the crate mesh: meshSimplification = the shape of the crate (floor, walls, hollow inside) with fewer triangles | convexHull = one solid hull per crate (the parts that move lie on top of it) | convexDecomposition | none = the triangle mesh of the file | "off" = no collider, only to look at
-      gap_m: 0.002                   # between crates of a layer: 3 x 0.365 + 2 gaps = 1.099 m, a layer fills the 1.1 m pallet
-    part: side_plate          # configs/object/<part>.yaml, dropped in at random place / yaw, lying flat (either side up)
-    layers: 6                 # crates on top of each other per pallet
-    grids: [[2, 3]]           # crates per layer along the pallet's x y: one of these, the crates turned so that the block is compact (a single grid: every layer the same, no zigzag)
-    grid_mode: pallet         # layer = a random grid for every layer | pallet = one for each pallet | alternate = the grids in turn
-    dynamic_layers: 6         # every layer is under gravity (a crate that is deleted lets its parts fall); 1 = only the top layer moves (the robot picks from it) and the layers below are fixed, which is lighter. The parts start at rest on the crate floors and fall asleep
-    sdf_layers: 6             # the moving parts of the top layer(s) (the ones the robot picks) have their exact shape as an SDF, like the fingertips (set at start; 0 = the collision of the part yaml, 32 hulls)
-    sdf_resolution: 256       # SDF cells along the longest side of the part (55.6 mm: ~0.2 mm)
-    layer_gap_m: -0.010       # the crates of a stack nest like real ones: the 10 mm high foot of a crate (473 x 313 mm, the crate is 520 x 365) goes into the rim of the one below,
-                              #   its wide part sits on that rim: a layer = 0.190 m (0 = they only touch and the foot shows as a dark gap; the default is +0.5 mm)
-    parallel: false           # every part lies level: upright (hub up) or flipped (hub down) at random, tilt_deg below is not used (false = tilt_deg)
-    tilt_deg:                 # random tilt of every part from lying flat (about a horizontal axis, random direction); the physics settles them from there
-      upright: [0, 6]         #   hub up (lies on its flange)
-      flipped: [8, 35]        #   hub down (stands on its hub: leaning)
-    parts_per_crate:          # gears per crate: one number for every crate, or [pallet][layer][row][col] - one list per pallet (0, 1: the order of items), per layer (0 = bottom, 5 = top),
-                              # per row (y of the pallet) and column (x of the pallet) of the grid of that layer (grids: [[2, 3]] = 3 rows x 2 columns of crates)
-      # - # pallet 0
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 1
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 2
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 3
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 4
-      #   - [[10, 10], [10, 10], [10, 150]]    # layer 5 (top)
-      # - # pallet 1
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 0 (bottom)
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 1
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 2
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 3
-      #   - [[10, 10], [10, 10], [10, 10]]    # layer 4
-      #   - [[10, 10], [10, 10], [10, 150]]    # layer 5 (top)
-
+      usd: ../../../assets/object/usd/SIDE_PLATE_BOX_520x365x200mm.usd
+      size_m: [0.520, 0.365, 0.200]
+      inner_size_m: [0.4516, 0.3042]
+      floor_z_m: 0.0149
+      collision: meshSimplification
+      gap_m: 0.002
+    part: side_plate
+    layers: 6
+    grids: [[2, 3]]
+    grid_mode: pallet
+    dynamic_layers: 6
+    sdf_layers: 6
+    sdf_resolution: 256
+    layer_gap_m: -0.010
+    parallel: true
+    tilt_deg:
+      upright: [0, 6]
+      flipped: [8, 35]
+    parts_per_crate:
       - # pallet 0
-        - [[1, 1], [1, 1], [1, 1]]    # layer 0 (bottom)
-        - [[1, 1], [1, 1], [1, 1]]    # layer 1
-        - [[1, 1], [1, 1], [1, 1]]    # layer 2
-        - [[1, 1], [1, 1], [1, 1]]    # layer 3
-        - [[1, 1], [1, 1], [1, 1]]    # layer 4
-        - [[1, 1], [1, 1], [1, 1]]    # layer 5 (top)
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[10, 10], [10, 10], [10, 10]]
       - # pallet 1
-        - [[1, 1], [1, 1], [1, 1]]    # layer 0 (bottom)
-        - [[1, 1], [1, 1], [1, 1]]    # layer 1
-        - [[1, 1], [1, 1], [1, 1]]    # layer 2
-        - [[1, 1], [1, 1], [1, 1]]    # layer 3
-        - [[1, 1], [1, 1], [1, 1]]    # layer 4
-        - [[1, 1], [1, 1], [1, 1]]    # layer 5 (top)
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[1, 1], [1, 1], [1, 1]]
+        - [[10, 10], [10, 10], [100, 100]]
 
-    switch_topic: /crate_active   # std_msgs/String json {"centre": [x, y]} (vision_pick.py): the crate of a `switch: true` layer that has physics now (one at a time)
-    physics:                  # the physics of the crates and parts per pallet and layer (0 = bottom; read at start: restart robot_sim.py after a change). The crates are always there and stacked (visible);
-                              #   physics: true  = the crates and parts of the layer have colliders, the parts are real bodies (gravity, contacts: they can be picked, they fall when their crate is removed)
-                              #   crates: [..]   = (optional) only these crates of the layer: the crate that the wrist camera looks at (pallet 1, crate 2 = x 0.214 y -0.742, the home pose). The other crates of the layer
-                              #                     are like physics: false (no collider at all). Without `crates:` all crates of the layer
-                              #   physics: false = no collider at all, not even a static one (the parts are fixed in their crates): nothing is calculated, the robot passes through them. z_m = bottom / rim of the crates (info)
-                              #   without this section every crate has its collider and the parts of the top dynamic_layers move
+    switch_topic: /crate_active
+    physics:
       - pallet: 0
         layers:
-          - {layer: 0, z_m: [0.1200, 0.3200], physics: false}
-          - {layer: 1, z_m: [0.3100, 0.5100], physics: false}
-          - {layer: 2, z_m: [0.5000, 0.7000], physics: false}
-          - {layer: 3, z_m: [0.6900, 0.8900], physics: false}
-          - {layer: 4, z_m: [0.8800, 1.0800], physics: false}
-          - {layer: 5, z_m: [1.0700, 1.2700], physics: false}
-      - pallet: 1                                                          # emptied layer by layer from the top (configs/sequence/side_plate_test.yaml crates: + crate.layers): every layer
-        layers:                                                            #   switch: true with no crate on (crates: []), the next layer is switched on when the one above is done
           - {layer: 0, z_m: [0.1200, 0.3200], physics: true, crates: [], switch: true}
           - {layer: 1, z_m: [0.3100, 0.5100], physics: true, crates: [], switch: true}
           - {layer: 2, z_m: [0.5000, 0.7000], physics: true, crates: [], switch: true}
           - {layer: 3, z_m: [0.6900, 0.8900], physics: true, crates: [], switch: true}
           - {layer: 4, z_m: [0.8800, 1.0800], physics: true, crates: [], switch: true}
-          - {layer: 5, z_m: [1.0700, 1.2700], physics: true, crates: [2], switch: true}   # the crate under the camera; switch: every crate of the layer gets bodies, only the one of
-                                                                                    #   crates: has physics at the start, the others are only to look at until /crate_active (switch_topic) names them
-  machines:                   # articulated machines with joints that move: configs/machine/<name>.yaml (URDF, speeds, carriers, ...) + where it stands in this map; remove this section = none
-    - name: laser_marker      # fitted to the STL copy of it in the map (SIDE_PLATE_MAP.usd, /SIDE_PLATE_MAP/LaserMarker): the URDF is turned by -90 deg about z (its long y axis is x there)
-      pos_m: [-1.2223, -0.6579, 0.0]   # (z 0: the frame stands on the floor and the belt pads lie in the rail slots; the belt is 18 mm lower in the URDF (pads in the slits) and the left station 56 mm so that its hands fit the belt, and the conveyor is lowered, see below) the base_link of the URDF in the world (m); the meshes match the STL to 0.2 mm
+          - {layer: 5, z_m: [1.0700, 1.2700], physics: true, crates: [], switch: true}
+      - pallet: 1
+        layers:
+          - {layer: 0, z_m: [0.1200, 0.3200], physics: true, crates: [], switch: true}
+          - {layer: 1, z_m: [0.3100, 0.5100], physics: true, crates: [], switch: true}
+          - {layer: 2, z_m: [0.5000, 0.7000], physics: true, crates: [], switch: true}
+          - {layer: 3, z_m: [0.6900, 0.8900], physics: true, crates: [], switch: true}
+          - {layer: 4, z_m: [0.8800, 1.0800], physics: true, crates: [], switch: true}
+          - {layer: 5, z_m: [1.0700, 1.2700], physics: true, crates: [2], switch: true}
+  machines:
+    - name: laser_marker
+      pos_m: [-1.2223, -0.6579, 0.0]
       rpy_deg: [0, 0, -90]
-      replaces: SIDE_PLATE_MAP/LaserMarker   # prim of the map USD (below /World/map) that is switched off, because the machine is the same thing
-    - name: conveyor          # the conveyor of the map as a URDF (a drive sprocket that turns): the STL copy of it in the map (/SIDE_PLATE_MAP/Conveyor, 180 MB) is switched off
-      pos_m: [-1.8399, 0.7521, -0.081]      # (z -0.081: the hands of the laser marker, which take the plate off the belt and turn it over, put it 63 mm lower than they took it; the feet go below the floor) base_link in the world: fitted to the STL by its outline (1.554 x 0.696 x 1.012 m) and the drive side that sticks out; turned by -90 deg about z
+      replaces: SIDE_PLATE_MAP/LaserMarker
+    - name: conveyor
+      pos_m: [-1.8399, 0.7521, -0.081]
       rpy_deg: [0, 0, -90]
       replaces: SIDE_PLATE_MAP/Conveyor
-  cameras:                    # fixed 2D cameras (robot_sim.py): one RGB picture per std_msgs/Empty on /<name>/capture -> output_dir (shown in the picture window of Isaac Sim);
-                              #   on a grey pole from the floor, only to look at (no collider)
-    - name: standard_cam      # looks at the plate on the standard seat, from beside the flipper: the pole 5 cm past the end of its station (x -0.22), 16 cm from the pallet;
-      pos_m: [-0.15, -0.95, 1.65]          #   the line of sight passes 4 cm above the flipper rotor at rest, the arm stays >= 0.3 m away (standard, turn_over, belt)
-      look_at_m: [-0.512, -0.658, 1.06]    # the plate on seat_standard
+  cameras:
+    - name: standard_cam
+      pos_m: [-0.15, -0.95, 1.65]
+      look_at_m: [-0.512, -0.658, 1.06]
       resolution: [1280, 960]
-      fov_deg: 40               # horizontal field of view (deg)
+      fov_deg: 40
       output_dir: ~/project/Simulation/isaacsim/assets_cache/cameras/standard_cam
-  objects: []                 # single rigid parts, configs/object/<part>.yaml; pos_m = part center (world, m), e.g.
-                              # - {part: side_plate, pos_m: [1.2, 0.0, 0.02], rpy_deg: [0, 0, 0]}
-  # bin:                        # [off by default: uncomment to use, with `defaults: [../object/bin]` and a `loading:` section in this file] picking test: the bin + a pile dropped into it
-  #   pos_m: [1.0, 0.0, 0.0]    # bin bottom centre (world, m)
-  #   rpy_deg: [0, 0, 0]
-  #   pile: {part: side_plate, count: 100, seed: random}   # dropped in like the dataset (random positions, uniform orientation)
-  #                             # seed: random = a new random pile on every start (the seed is printed: use it as a number to get
-  #                             # the same pile again), a number = always the same pile
-  # basket:                     # [off by default: uncomment to use] an open box (floor + 4 walls, kinematic), world coordinates
-  #   pos_m: [0.3, 0.5, 0.0]    # basket bottom centre (m). Only an object of the scene: the sequence of the robot does not read it
-  #   rpy_deg: [0, 0, 0]
-  #   size_m: [0.40, 0.30, 0.15]  # outer size [x, y, z]
-  #   wall_thickness_m: 0.01      # floor and walls
-  #   color: [0.80, 0.50, 0.20]   # orange-brown
+  objects: []

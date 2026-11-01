@@ -1,21 +1,6 @@
-"""Collect the bin-picking dataset until a target number of images exists, surviving Isaac Sim hangs and crashes.
+"""generate_supervisor.py: runs generate_isaacsim.py shard after shard until the target number of images exists, restarting it when Isaac Sim hangs or crashes.
 
-    lab generate_supervisor.py [--config configs/map/map.yaml] [--generator generate_isaacsim.py] [--images 25000]
-                        [--stall-min 5] [key=value ...]
-    lab generate_supervisor.py obj:=support_input_shaft obj_num:=10 out:=~/Downloads/shaft_data     (short words: see generate_isaacsim.py)
-
---images: images per part (default run.num_scenes x run.views_per_scene). run.num_parts: N (default 1) runs N such
-parts back to back, each in its own folder <output_dir>/part_01 .. part_N with scene ids continuing (part 2 of
-250-scene parts = scenes 000250-000499, other piles: the id offset is part of the seed). Finished parts are skipped,
-so running the same command again resumes where it stopped.
---scenes-per-process N (default 30, 0 = off): every Isaac Sim process stops after N scenes and a fresh one continues
-(next shard_XX folder, scene ids continuing).
-
-Runs the generator (--generator, default generate_isaacsim.py next to this file) one shard at a time. When a shard stops making progress (no new
-"[INFO] scene" line for --stall-min minutes) its thread stacks are saved to <output_dir>/logs/hang_shard_XX_*.txt
-(py-spy, Python + native frames), the process is killed, the scenes it had not finished writing are deleted and
-the next shard continues (new run.shard_id -> new piles; nothing is overwritten). Complete scenes of existing shards
-count toward the target, so running the same command again resumes. Logs: <output_dir>/logs/shard_XX.log.
+    lab generate_supervisor.py [--config configs/map/map.yaml] [--generator generate_isaacsim.py] [--images 25000] [--stall-min 5] [key=value ...]
 """
 import argparse
 import json
@@ -28,10 +13,10 @@ import sys
 import threading
 import time
 
-REPO = os.path.dirname(os.path.abspath(__file__))  # Simulation/isaacsim: configs/, binsim/, assets_cache/
+REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 
-from binsim.config import expand_shorthand, load_config  # noqa: E402
+from binsim.config import expand_shorthand, load_config
 
 GEN = os.path.join(REPO, "generate_isaacsim.py")
 _child = {"proc": None, "stop": False}
@@ -53,11 +38,10 @@ def scene_dirs(shard_dir):
 
 
 def complete(scene_dir):
-    return os.path.exists(os.path.join(scene_dir, "scene_info.json"))  # written last by process_scene
+    return os.path.exists(os.path.join(scene_dir, "scene_info.json"))
 
 
 def scene_images(scene_dir):
-    """Images of a finished scene: scene_info.json num_views (works with outputs.folders.rgb off), else rgb/ files."""
     try:
         with open(os.path.join(scene_dir, "scene_info.json")) as f:
             n = json.load(f).get("num_views")
@@ -81,7 +65,6 @@ def drop_unfinished(shard_dir):
 
 
 def dump_stacks(pid, path):
-    """Python + native stacks of every thread of the hung process (the generator allows ptrace for this)."""
     pyspy = shutil.which("py-spy") or os.path.expanduser("~/.local/bin/py-spy")
     with open(path, "w") as f:
         for cmd in ([pyspy, "dump", "--native", "--pid", str(pid)], [pyspy, "dump", "--pid", str(pid)]):
@@ -90,10 +73,10 @@ def dump_stacks(pid, path):
                 f.write(f"$ {' '.join(cmd)}\n{r.stdout}\n{r.stderr}\n")
                 if r.returncode == 0:
                     break
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 f.write(f"$ {' '.join(cmd)}\nfailed: {e}\n")
     try:
-        os.kill(pid, signal.SIGUSR1)  # faulthandler: Python stacks into the shard log as well
+        os.kill(pid, signal.SIGUSR1)
     except OSError:
         pass
 
@@ -112,7 +95,6 @@ def kill_group(proc):
 
 
 def run_shard(args, overrides, out, sid, num_scenes):
-    """Run one shard to completion or until it hangs. Returns 'done' | 'exit <rc>' | 'hang'."""
     os.makedirs(os.path.join(out, "logs"), exist_ok=True)
     cmd = [sys.executable, args.generator, "--config", args.config, *overrides, f"run.shard_id={sid}", f"run.num_scenes={num_scenes}"]
     say(f"shard {sid}: {num_scenes} scenes | {' '.join(cmd)}")
@@ -157,7 +139,6 @@ def run_shard(args, overrides, out, sid, num_scenes):
 
 
 def _on_signal(signum, frame):
-    """Ctrl+C / kill: stop the running shard too (it is in its own session) and do not start another one."""
     _child["stop"] = True
     if _child["proc"] is not None:
         say("stopping ...")
@@ -184,17 +165,17 @@ def main():
                                                  "obj_num:=N out:=DIR work as in generate_isaacsim.py")
     args = ap.parse_args()
     args.config = os.path.abspath(args.config)
-    args.overrides = expand_shorthand(args.overrides, args.config)   # obj:= obj_num:= out:= -> dotted overrides (the shards get those)
+    args.overrides = expand_shorthand(args.overrides, args.config)
     args.generator = os.path.abspath(os.path.expanduser(args.generator))
     if not args.dry_run and not os.path.isfile(args.generator):
         sys.exit(f"generator not found: {args.generator} (put generate_isaacsim.py there or pass --generator)")
     cfg = load_config(args.config, args.overrides)
     root = os.path.expanduser(cfg.run.output_dir)
     V = int(cfg.run.views_per_scene)
-    target = int(args.images) if args.images else int(cfg.run.num_scenes) * V  # per part
+    target = int(args.images) if args.images else int(cfg.run.num_scenes) * V
     n_parts = max(int(cfg.run.get("num_parts", 1) or 1), 1)
     offset0 = int(cfg.run.get("scene_offset", 0))
-    per_part = math.ceil(target / V)  # scenes per part -> scene id offset of the next part
+    per_part = math.ceil(target / V)
     parts = [(root, list(args.overrides))] if n_parts == 1 else [
         (os.path.join(root, f"part_{p + 1:02d}"),
          [*args.overrides, f"run.output_dir={os.path.join(root, f'part_{p + 1:02d}')}", f"run.scene_offset={offset0 + p * per_part}"])
@@ -220,7 +201,6 @@ def main():
 
 
 def complete_ids(folder):
-    """Ids of the complete scenes in every shard under folder (and its part_XX folders)."""
     shards = [*shard_dirs(folder).values()]
     for p in (os.path.join(folder, d) for d in os.listdir(folder) if d.startswith("part_")) if os.path.isdir(folder) else []:
         shards += shard_dirs(p).values()
@@ -228,8 +208,6 @@ def complete_ids(folder):
 
 
 def supervise(args, out, target, overrides, V, root, part_offset):
-    """Start shards in `out` until `target` images exist there (resumes; a hung shard is replaced by a new one).
-    Every process makes at most --scenes-per-process scenes; scene ids continue from the part's last one."""
     failures = 0
     while True:
         for d in shard_dirs(out).values():
@@ -243,8 +221,8 @@ def supervise(args, out, target, overrides, V, root, part_offset):
         need = math.ceil((target - have) / V)
         if args.scenes_per_process > 0:
             need = min(need, args.scenes_per_process)
-        taken = complete_ids(root)  # all parts: an id is never used twice
-        base = part_offset  # first free block of `need` ids from the part's start: ids continue 000000, 000001, ...
+        taken = complete_ids(root)
+        base = part_offset
         while clash := [i for i in range(base, base + need) if i in taken]:
             base = max(clash) + 1
         before = have

@@ -1,13 +1,4 @@
-"""Experiment config: YAML with `defaults:` includes, per-part files, and dotted CLI overrides.
-
-    cfg = load_config("configs/default.yaml", ["run.num_envs=32", "loading.mode=layers"])
-    cfg.run.num_envs  -> 32
-
-Merge order (later wins): each file listed in `defaults:` -> the file itself -> CLI overrides.
-Part entries (`parts: [{config: objects/x.yaml, count: [5, 10]}]`) are expanded: the part file is
-loaded and the entry's own keys override it. Relative file paths are resolved against the YAML
-file they appear in, so configs can be moved around together with their assets.
-"""
+"""Experiment config: YAML with `defaults:` includes, per-part files and dotted command line overrides (key=value), merged in that order."""
 from __future__ import annotations
 
 import copy
@@ -16,12 +7,10 @@ from typing import Any, Iterable
 
 import yaml
 
-# Keys whose string values are file paths (resolved relative to the YAML that defines them).
 PATH_KEYS = {"mesh", "usd", "collision_mesh", "output_dir", "cache_dir", "experience", "grasp_file"}
 
 
 class Cfg(dict):
-    """dict with attribute access (recursive). Plain dict underneath so it dumps to YAML/JSON."""
 
     def __getattr__(self, key):
         try:
@@ -61,7 +50,6 @@ def to_plain(obj):
 
 
 def deep_merge(base: dict, over: dict) -> dict:
-    """Recursive merge; dicts merge, everything else (incl. lists) is replaced."""
     out = copy.deepcopy(base)
     for k, v in over.items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -85,7 +73,6 @@ def _resolve_paths(node, base_dir: str):
 
 
 def resolve_path(p: str, base_dir: str) -> str:
-    # "{ISAACLAB_NUCLEUS_DIR}/..." placeholders and omniverse:// / http(s):// URLs resolve at runtime.
     if p.startswith("{") or "://" in p:
         return p
     p = os.path.expandvars(os.path.expanduser(p))
@@ -155,8 +142,6 @@ def _slug(name: str) -> str:
 
 
 def _find_part_file(obj: str, config_dir: str) -> str:
-    """configs/object/<obj>.yaml: <obj> with or without .yaml, matched without regard to case, `-` and `_` (SUPPORT-INPUT_SHAFT);
-    a path to a yaml works too"""
     path = os.path.expanduser(obj)
     if path.endswith((".yaml", ".yml")) and os.path.isfile(path):
         return os.path.abspath(path)
@@ -171,16 +156,6 @@ def _find_part_file(obj: str, config_dir: str) -> str:
 
 
 def expand_shorthand(items: Iterable[str], config_path: str) -> list[str]:
-    """Short command line words -> the dotted overrides they stand for (the other items are kept, and win over them):
-
-        obj:=<part>      parts.0.config=<configs/object/<part>.yaml>   the part (first entry of `parts:`) that is placed in the bin
-        obj_num:=N       parts.0.count=[N, N]                         how many (N or [min, max]); without it the part yaml's `count:`
-                                                                      is used (make_object_config.py writes one), else map.yaml's
-        out:=DIR         run.output_dir=DIR
-        scenes:=N        run.num_scenes=N          piles = camera cycles
-        views:=N         run.views_per_scene=N     images per pile (scenes x views images in all)
-    Any other word of the form name:=value is an error (it would be ignored silently otherwise).
-    """
     obj = num = out = None
     extra = []
     rest = []
@@ -220,8 +195,6 @@ def load_config(path: str, overrides: Iterable[str] = ()) -> Cfg:
     tree = _load_yaml_tree(path)
     for k, v in parse_overrides(overrides):
         apply_override(tree, k, v)
-    # Parts are expanded after overrides so `parts.0.config=...` can swap a part file,
-    # then overrides are re-applied so `parts.0.mass_kg=...` beats the part file.
     config_dir = os.path.dirname(os.path.abspath(path))
     tree["parts"] = _expand_parts(tree.get("parts", []), config_dir)
     for k, v in parse_overrides(overrides):
@@ -238,7 +211,6 @@ def load_config(path: str, overrides: Iterable[str] = ()) -> Cfg:
 
 
 def _range(v, name, lo=None):
-    """Normalize a scalar or [min, max] into a (min, max) tuple."""
     if isinstance(v, (int, float)):
         v = [v, v]
     if not (isinstance(v, (list, tuple)) and len(v) == 2 and v[0] <= v[1]):

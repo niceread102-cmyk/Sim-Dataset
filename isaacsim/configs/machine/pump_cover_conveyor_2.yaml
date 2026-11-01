@@ -1,0 +1,32 @@
+# The pump cover conveyor 2 (assets/machine/pump_cover_conveyor_2): URDF in the CAD frame of the pump cover cell, chain of 7 jigs (robot_sim.py moves the carriers on carriers.topic, machine/conveyor.py --machine pump_cover_conveyor_2 steps them); a map places it in scene.machines with pos_m [-2.0, 1.8, 0.0], rpy_deg [0, 0, -90].
+urdf: pump_cover_conveyor_2/pump_cover_conveyor_2.urdf
+
+collision_decomposition: {"c2_jig_[0-9]+_link": {sdf: 256}}
+
+carriers:
+  joints: [c2_jig_01_travel, c2_jig_02_travel, c2_jig_03_travel, c2_jig_04_travel, c2_jig_05_travel, c2_jig_06_travel, c2_jig_07_travel]
+  slots_m: [2.85274, 3.0582, 3.2682, 3.4782, 3.6882, 3.8982, 4.10308]
+  #joints: [c2_jig_02_travel, c2_jig_03_travel, c2_jig_04_travel, c2_jig_05_travel, c2_jig_06_travel]
+  #slots_m: [3.0582, 3.2682, 3.4782, 3.6882, 3.8982]
+  #window_m: [2.7103, 4.2601]
+  #window_m: [2.7403, 4.2103]
+  #window_m: [3.0582, 4.1082]
+  window_m: [2.7403, 4.2103]
+  axis: [1, 0, 0]
+  reverse: true
+  speed_mps: 0.2
+  accel_mps2: 0.5
+  topic: /pump_cover_conveyor_2/carriers
+
+trigger_topic: /pump_cover_conveyor_2/step
+
+attach:
+  enabled: true
+  trigger_topic: /pump_cover_conveyor_2/remove
+  delay_s: 0.3
+  #remove_box_m: [[3.889, 3.989], [0.15, 0.55], [1.0, 1.2]]
+  remove_box_m: [[4.094, 4.194], [0.15, 0.55], [1.0, 1.2]]
+  base_link: c2_base
+
+cycle:
+  timeouts_s: {machine: 60.0, start: 10.0, step: 60.0}

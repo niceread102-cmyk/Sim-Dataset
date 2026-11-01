@@ -1,9 +1,4 @@
-"""Turn one settled scene's raw renders + GT poses into dataset files. Simulator-independent,
-runs on the writer thread pool (and in tests with synthetic data).
-
-Inputs per view: RGB, perfect depth (m), instance map already resolved to pool-slot indices,
-camera pose in the bin frame. Outputs: BOP files, COCO, grasp labels, per-part pose tables, viz.
-"""
+"""One settled scene (renders + GT poses) -> dataset files: BOP, COCO, grasp labels, pose tables, viz. Runs on the writer threads."""
 from __future__ import annotations
 
 import csv
@@ -25,18 +20,17 @@ from .writers.coco import CocoScene, rle_encode_crop
 
 @dataclass
 class SceneContext:
-    """Shared, read-only state for all scenes of a run."""
     cfg: dict
-    intr: object                   # camera.Intrinsics
+    intr: object
     part_cfgs: list
-    assets: list                   # assets.MeshAsset per part type
-    points: list                   # (N,3) surface samples per part type (grasp collision)
-    libraries: list                # grasps.GraspLibrary per part type
+    assets: list
+    points: list
+    libraries: list
     bin_geom: object
     rim_z: float
     out_root: str
-    render_intr: object = None     # camera.Intrinsics of the raw renders (ideal pinhole, larger than the image with a lens)
-    warp: object = None            # lens.LensWarp: renders -> images of the real lens (None = the renders are the images)
+    render_intr: object = None
+    warp: object = None
 
     @property
     def K(self):
@@ -45,26 +39,25 @@ class SceneContext:
 
 @dataclass
 class ViewCapture:
-    rgb: np.ndarray                # (H,W,3|4) uint8
-    depth: np.ndarray              # (H,W) float32, meters (distance to image plane)
-    inst: np.ndarray               # (H,W) int32 pool-slot index, -1 = not a part
-    T_bin_cam: np.ndarray          # 4x4 camera (OpenCV axes) -> bin frame
-    T_bin_part: list | None = None  # per-part poses (bin frame) at this view if the pile moved since the scene
-                                    # poses were read (vibration between views); None = SceneCapture.T_bin_part
+    rgb: np.ndarray
+    depth: np.ndarray
+    inst: np.ndarray
+    T_bin_cam: np.ndarray
+    T_bin_part: list | None = None
 
 
 @dataclass
 class SceneCapture:
     scene_id: int
     mode: str
-    slots: list                    # pool slot per part in the scene
-    types: list                    # part type index per part
-    T_bin_part: list               # 4x4 per part, bin frame
+    slots: list
+    types: list
+    T_bin_part: list
     views: list = field(default_factory=list)
     save_viz: bool = False
     seed: int = 0
-    removed: int = 0               # parts that escaped the bin and were removed before capture
-    picked: int = 0                # parts removed from the top during the scene (loading.pick)
+    removed: int = 0
+    picked: int = 0
 
 
 def _write_ply(path, pts, cols):
@@ -78,7 +71,6 @@ def _write_ply(path, pts, cols):
 
 
 def _projected_bbox(verts_cam: np.ndarray, K: np.ndarray, W: int, H: int, dist=()):
-    """Amodal BOP bbox [x, y, w, h] from the projected model vertices, clipped to the image ([-1]*4 if outside)."""
     v = verts_cam[verts_cam[:, 2] > 1e-4]
     if len(v) == 0:
         return [-1, -1, -1, -1]
@@ -95,19 +87,19 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
     cfg = ctx.cfg
     out_cfg = cfg.get("outputs", {})
     full_masks = bool(out_cfg.get("full_masks", True))
-    mask_format = str(out_cfg.get("mask_format", "per_part"))  # per_part (BOP mask_visib/) | instance (1 PNG per view)
+    mask_format = str(out_cfg.get("mask_format", "per_part"))
     if mask_format not in ("per_part", "instance"):
         raise ValueError(f"outputs.mask_format must be per_part or instance, got {mask_format!r}")
     do_coco = bool(out_cfg.get("coco", True))
-    viz_views = int(cfg.get("run", {}).get("save_viz_views", 0) or 0)  # 0 = every view of a viz scene
+    viz_views = int(cfg.get("run", {}).get("save_viz_views", 0) or 0)
     cam_cfg = cfg["camera"]
     gcfg = cfg.get("grasps", {})
     rng = np.random.default_rng(sc.seed)
-    K = ctx.K                      # K (+ dist) of the saved images
+    K = ctx.K
     W, H = ctx.intr.width, ctx.intr.height
     dist = tuple(getattr(ctx.intr, "dist", ()) or ())
     warp = ctx.warp
-    K_ren = ctx.render_intr.K if ctx.render_intr is not None else K  # the renders are ideal pinhole images (depth noise works in them)
+    K_ren = ctx.render_intr.K if ctx.render_intr is not None else K
     depth_scale = float(out_cfg.get("depth_scale", 0.1))
     writer = SceneWriter(ctx.out_root, sc.scene_id, depth_scale, bool(out_cfg.get("save_clean_depth", False)),
                          out_cfg.get("folders"), cam_cfg.get("depth_range_m", [0.458, 1.118]),
@@ -122,7 +114,6 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
     grasp_cache = {}
 
     def grasps_for(T_parts):
-        """Grasp candidates and valid-grasp count per part for one pile state (views share it until it moves)."""
         if id(T_parts) not in grasp_cache:
             gs = []
             if gcfg.get("enabled", True) and n:
@@ -140,12 +131,10 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
         scene_grasps, valid_per_part = grasps_for(T_parts)
         depth_clean = np.asarray(v.depth, np.float64)
         depth = apply_depth_noise(depth_clean, K_ren, cam_cfg, rng, np.asarray(v.inst) >= 0)
-        # the PNG stores depth in depth_scale (mm) steps: round here so the saved file, viz and px_count_valid all
-        # use exactly the same values
         depth = np.clip(np.round(depth * 1000.0 / depth_scale), 0, 65535) * depth_scale / 1000.0
         rgb = np.ascontiguousarray(v.rgb[..., :3])
         inst_slot = np.asarray(v.inst)
-        if warp is not None:  # camera.lens: bend the ideal renders into the image of the real lens (nearest for values that must not mix)
+        if warp is not None:
             depth, depth_clean, inst_slot = warp.labels(depth), warp.labels(depth_clean), warp.labels(inst_slot, -1)
             rgb = warp.image(rgb)
         if cam_cfg.get("image_mode", "rgb") == "gray":
@@ -159,9 +148,7 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
         inst = np.where((inst_slot >= 0) & (inst_slot < len(slot_to_gt)), slot_to_gt[np.clip(inst_slot, 0, len(slot_to_gt) - 1)], -1)
         T_cam_bin = inv_T(v.T_bin_cam)
 
-        # per-part pixel counts and visible boxes in one pass over the image (not one full-image pass per part);
-        # each part's visible mask is then only handled inside its box
-        lab = (inst + 1).astype(np.int32)  # 0 = no part
+        lab = (inst + 1).astype(np.int32)
         px_vis_all = np.bincount(lab.ravel(), minlength=n + 1)[1:n + 1]
         px_valid_all = np.bincount(lab[depth > 0], minlength=n + 1)[1:n + 1]
         boxes = ndimage.find_objects(lab, max_label=n) if n else []
@@ -189,8 +176,6 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
                 if px_vis > 200:
                     consistency.append(float((full[box] & crop).sum() / px_vis))
             else:
-                # outputs.full_masks: false -> no amodal silhouette (the slow part); pose and visible mask are
-                # unaffected, but visib_fract / px_count_all are unknown (null in scene_gt_info.json)
                 full, px_all, vf = None, None, float("nan")
                 bbox_obj = _projected_bbox(verts, K, W, H, dist)
             visib[k] = vf
@@ -217,7 +202,6 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
         top, top_g = G.pick_topmost(T_parts, sc.types, ctx.points, visib, scene_grasps, float(gcfg.get("min_visib", 0.6)))
         top_g_cam = (T_cam_bin @ top_g.T_w) if top_g is not None else None
 
-        # grasp labels in the camera frame
         glist = []
         for g in scene_grasps:
             Tc = T_cam_bin @ g.T_w
@@ -230,7 +214,6 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
             with open(os.path.join(writer._sub("grasps"), f"{im_id:06d}.json"), "w") as f:
                 json.dump({"topmost_gt_idx": top, "grasps": glist}, f)
 
-        # per-part 6DOF table
         rows = []
         for p in parts_view:
             q_c, q_b = mat_to_quat(p["R"]), mat_to_quat(p["R_bin"])
@@ -272,7 +255,7 @@ def process_scene(ctx: SceneContext, sc: SceneCapture) -> dict:
                                  "table": part_table_lines(parts_view) if im_id == 0 else None})
     writer.finalize()
     if out_cfg.get("coco", True):
-        writer.write_json("scene_gt_coco.json", coco.data, indent=None)  # ~300 RLEs per image: keep it compact
+        writer.write_json("scene_gt_coco.json", coco.data, indent=None)
     writer.write_json("scene_info.json", {"mode": sc.mode, "slots": sc.slots, "types": sc.types, "removed": sc.removed,
                                           "seed": sc.seed, "num_views": len(sc.views), "picked": sc.picked, "num_valid_grasps": int(grasps_for(sc.T_bin_part)[1].sum())})
     return summary

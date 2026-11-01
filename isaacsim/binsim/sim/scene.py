@@ -1,11 +1,4 @@
-"""Isaac Lab scene: N cloned envs, each = floor + bin + robot + part pool + tiled camera + key light.
-
-Env layout (env frame == world frame shifted by the env origin, no rotation):
-    bin frame at bin.pos_m / bin.rpy_deg, robot at robot.pos_m, camera placed per view.
-Part pool: for each part type, `max count` slots (prims part_000, part_001, ...). Every env has
-the same prims (required for cloning); unused / escaped slots are parked on a hidden shelf below
-the floor, out of every camera's view.
-"""
+"""Isaac Lab scene: N cloned envs, each floor + bin + robot + part pool + tiled camera + key light."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,14 +17,14 @@ from ..transforms import mat_to_quat, rpy_to_mat
 from .compat import resolve_nucleus, to_sim_quat
 
 FLOOR_SIZE = 3.6
-PARK_Z = -3.0          # parking shelf height (below the visual floor)
+PARK_Z = -3.0
 
 
 @dataclass
 class PoolLayout:
-    slot_type: list[int]           # part type per slot
-    type_slots: list[list[int]]    # slots per part type
-    park_pos: np.ndarray           # (S,3) env-frame parking position per slot
+    slot_type: list[int]
+    type_slots: list[list[int]]
+    park_pos: np.ndarray
 
 
 def pool_layout(parts_cfg, radii) -> PoolLayout:
@@ -59,8 +52,6 @@ def build_scene_cfg(cfg, part_assets, bin_asset, intr, layout: PoolLayout):
     sc = BinSceneCfg(num_envs=int(run.num_envs), env_spacing=float(run.get("env_spacing_m", 4.0)),
                      replicate_physics=True)
 
-    # visual/collision floor (a finite box, not an infinite ground plane: PhysX planes are
-    # half-spaces and would push the parking shelf's parts up through the floor)
     sc.floor = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/floor",
         spawn=sim_utils.CuboidCfg(size=(FLOOR_SIZE, FLOOR_SIZE, 0.05), collision_props=sim_utils.CollisionPropertiesCfg(),
@@ -119,7 +110,7 @@ def build_scene_cfg(cfg, part_assets, bin_asset, intr, layout: PoolLayout):
         spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
             intrinsic_matrix=intr.K.flatten().tolist(), width=intr.width, height=intr.height, clipping_range=(near, far)),
         width=intr.width, height=intr.height, colorize_instance_id_segmentation=False,
-        update_latest_camera_pose=True)  # GT uses the pose read back after each move; default only reads it at init
+        update_latest_camera_pose=True)
 
     if cfg.run.get("save_overview_every", 0) is not None:
         sc.overview = CameraCfg(
@@ -129,7 +120,6 @@ def build_scene_cfg(cfg, part_assets, bin_asset, intr, layout: PoolLayout):
 
 
 def attach_gripper_visual(stage, cfg, num_envs: int):
-    """Reference an optional visual gripper USD under the robot's flange link in every env."""
     g = cfg.get("gripper", {}) or {}
     if not g.get("usd") or not (cfg.get("robot", {}) or {}).get("enabled"):
         return

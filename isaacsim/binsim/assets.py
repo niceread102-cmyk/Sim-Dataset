@@ -1,13 +1,4 @@
-"""CAD -> simulation assets, cached by content hash.
-
-    STEP/STP  --(cadquery or gmsh)-->  mesh  --(trimesh)-->  model (meters, optionally centered)
-    STL/OBJ/PLY ---------------------->  mesh
-    model -> <cache>/<name>_<hash>/{model.stl (m), model_mm.ply (BOP), part.usd, info.json}
-
-USD files are authored directly with pxr (UsdGeom/UsdPhysics/UsdShade), so this module works in
-plain Python with `usd-core` as well as inside Isaac Sim. Parts are dynamic rigid bodies with
-convex-decomposition (or convex-hull / SDF) colliders; the bin is a kinematic rigid body.
-"""
+"""CAD -> simulation assets (mesh in m, BOP ply, part USD with physics), cached by content hash in assets_cache/."""
 from __future__ import annotations
 
 import atexit
@@ -24,19 +15,15 @@ import trimesh
 
 from .config import to_plain
 
-ASSET_VERSION = 5  # bump to invalidate caches when authoring changes
+ASSET_VERSION = 5
 UNIT_SCALE = {"m": 1.0, "mm": 1e-3, "cm": 1e-2, "in": 0.0254}
 
-_simulation_app = None  # set if we had to boot Isaac Sim just to get `pxr` (see _ensure_pxr)
+_simulation_app = None
 
 
 def _ensure_pxr():
-    """`pip install usd-core` has no aarch64 wheel, and on some Isaac Sim/Kit builds `pxr` is
-    only put on sys.path once a Kit app has started (it's not importable from a bare
-    `isaaclab.sh -p` / `python.sh -c "import pxr"`). If a plain `import pxr` fails, boot a
-    headless Isaac Sim app once per process so the rest of this module can use it normally."""
     try:
-        import pxr  # noqa: F401
+        import pxr
         return
     except ImportError:
         pass
@@ -60,16 +47,13 @@ class MeshAsset:
     name: str
     dir: str
     usd_path: str
-    mesh: trimesh.Trimesh        # meters, in the (possibly recentered) model frame
-    extents: np.ndarray          # (3,) m
-    radius: float                # bounding-sphere radius around the model origin, m
+    mesh: trimesh.Trimesh
+    extents: np.ndarray
+    radius: float
     ply_mm_path: str
 
 
-# ---------------------------------------------------------------- mesh loading
-
 def _step_to_stl(step_path: str, out_stl: str, tol_mm: float):
-    """Tessellate a STEP file. Tries cadquery (OCP), then gmsh. Output is in millimeters."""
     try:
         import cadquery as cq
         shape = cq.importers.importStep(step_path)
@@ -99,7 +83,6 @@ def _step_to_stl(step_path: str, out_stl: str, tol_mm: float):
 
 
 def load_mesh(path: str, units: str = "mm", step_tol_mm: float = 0.05) -> trimesh.Trimesh:
-    """Load any supported CAD/mesh file, returned in METERS."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"mesh file not found: {path}")
     ext = os.path.splitext(path)[1].lower()
@@ -108,7 +91,7 @@ def load_mesh(path: str, units: str = "mm", step_tol_mm: float = 0.05) -> trimes
             stl = os.path.join(td, "tess.stl")
             _step_to_stl(path, stl, step_tol_mm)
             m = trimesh.load(stl, force="mesh")
-        units = "mm"  # OCC/gmsh export STEP geometry in mm
+        units = "mm"
     else:
         m = trimesh.load(path, force="mesh")
     if not isinstance(m, trimesh.Trimesh) or len(m.faces) == 0:
@@ -130,8 +113,6 @@ def _hash(path: str | None, settings: dict) -> str:
     return h.hexdigest()[:12]
 
 
-# ---------------------------------------------------------------- USD authoring
-
 def _stage(path: str):
     from pxr import Usd, UsdGeom
     stage = Usd.Stage.CreateNew(path)
@@ -146,7 +127,6 @@ def _add_mesh(stage, prim_path: str, mesh: trimesh.Trimesh, approximation: str, 
     geom.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*map(float, v)) for v in mesh.vertices]))
     geom.CreateFaceVertexCountsAttr(Vt.IntArray([3] * len(mesh.faces)))
     geom.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.faces.flatten().tolist()))
-    # per-triangle normals, like Isaac Sim's STL import (otherwise the renderer smooths across hard edges)
     geom.CreateNormalsAttr(Vt.Vec3fArray([Gf.Vec3f(*map(float, n)) for n in np.repeat(mesh.face_normals, 3, axis=0)]))
     geom.SetNormalsInterpolation(UsdGeom.Tokens.faceVarying)
     geom.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
@@ -174,7 +154,6 @@ def _sdf_type(name):
 
 
 def define_omnipbr(stage, path: str):
-    """OmniPBR (MDL) material — the shader Isaac Sim's GUI creates, so parts look the same as GUI-made USDs."""
     from pxr import Sdf, UsdShade
     mat = UsdShade.Material.Define(stage, path)
     sh = UsdShade.Shader.Define(stage, f"{path}/Shader")
@@ -221,7 +200,6 @@ def _bind(prim, vis, phys):
 
 
 def _set_physx(prim, api: str, ns: str, attrs: dict):
-    """Apply a PhysX schema and author the given attributes; unset (None) values keep PhysX defaults."""
     vals = {k: v for k, v in attrs.items() if v[1] is not None}
     if not vals:
         return
@@ -240,7 +218,6 @@ def write_part_usd(path: str, mesh: trimesh.Trimesh, part_cfg):
     UsdPhysics.MassAPI.Apply(root).CreateMassAttr(float(part_cfg.get("mass_kg", 0.05)))
     geom = _add_mesh(stage, "/Part/geometry", mesh, part_cfg.get("collision", "convexDecomposition"),
                      {"max_convex_hulls": part_cfg.get("max_convex_hulls", 32)})
-    # PhysX settings live in the USD so every loader (Isaac Lab scene, Isaac Sim script, GUI) gets them
     px = part_cfg.get("physx", {}) or {}
     _set_physx(root, "PhysxRigidBodyAPI", "physxRigidBody", {
         "maxDepenetrationVelocity": ("float", px.get("max_depenetration_velocity")),
@@ -264,11 +241,9 @@ def write_part_usd(path: str, mesh: trimesh.Trimesh, part_cfg):
 
 
 def procedural_bin_meshes(size, t) -> list[trimesh.Trimesh]:
-    """Floor + 4 walls as separate boxes (each convex -> exact convexHull colliders).
-    Bin frame: origin at bottom center, z up."""
     X, Y, Z = size
     boxes = [
-        ([X, Y, t], [0, 0, t / 2]),                                   # floor
+        ([X, Y, t], [0, 0, t / 2]),
         ([t, Y, Z], [X / 2 - t / 2, 0, Z / 2]), ([t, Y, Z], [-X / 2 + t / 2, 0, Z / 2]),
         ([X - 2 * t, t, Z], [0, Y / 2 - t / 2, Z / 2]), ([X - 2 * t, t, Z], [0, -Y / 2 + t / 2, Z / 2]),
     ]
@@ -286,7 +261,7 @@ def write_bin_usd(path: str, meshes: list[trimesh.Trimesh], bin_cfg, approximati
     root = UsdGeom.Xform.Define(stage, "/Bin").GetPrim()
     stage.SetDefaultPrim(root)
     rb = UsdPhysics.RigidBodyAPI.Apply(root)
-    rb.CreateKinematicEnabledAttr(True)        # kinematic: never moves unless we drive it (shake)
+    rb.CreateKinematicEnabledAttr(True)
     vis, phys = _add_materials(stage, "/Bin", bin_cfg.get("color", [0.2, 0.3, 0.6]),
                                bin_cfg.get("friction", 0.5), 0.0, 0.7, 0.0)
     for i, m in enumerate(meshes):
@@ -294,12 +269,13 @@ def write_bin_usd(path: str, meshes: list[trimesh.Trimesh], bin_cfg, approximati
     stage.GetRootLayer().Save()
 
 
-# ---------------------------------------------------------------- public API
-
 def prepare_part(part_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
     settings = {k: part_cfg.get(k) for k in ("units", "recenter", "mass_kg", "friction", "restitution",
                                              "collision", "max_convex_hulls", "color", "color_tint", "roughness",
                                              "metallic", "step_tolerance_mm", "physx")}
+    for k in ("axis_origin_mm", "axis_rpy_deg"):
+        if part_cfg.get(k):
+            settings[k] = [float(v) for v in part_cfg[k]]
     key = _hash(part_cfg["mesh"], settings)
     d = os.path.join(cache_dir, f"{part_cfg['name']}_{key}")
     usd, stl, ply = (os.path.join(d, f) for f in ("part.usd", "model.stl", "model_mm.ply"))
@@ -310,6 +286,13 @@ def prepare_part(part_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
         mesh = load_mesh(part_cfg["mesh"], part_cfg.get("units", "mm"), float(part_cfg.get("step_tolerance_mm", 0.05)))
         if part_cfg.get("recenter", True):
             mesh.apply_translation(-mesh.bounds.mean(axis=0))
+        if part_cfg.get("axis_origin_mm"):
+            mesh.apply_translation(-np.asarray(part_cfg["axis_origin_mm"], float) * 1e-3)
+        if part_cfg.get("axis_rpy_deg"):
+            from .transforms import rpy_to_mat
+            T = np.eye(4)
+            T[:3, :3] = rpy_to_mat(part_cfg["axis_rpy_deg"]).T
+            mesh.apply_transform(T)
         if not mesh.is_watertight:
             print(f"[WARN] {part_cfg['name']}: mesh is not watertight — collisions/visibility may be off", flush=True)
         mesh.export(stl)
@@ -339,11 +322,9 @@ def prepare_bin(bin_cfg, cache_dir: str, force: bool = False) -> MeshAsset:
             meshes = [m]
             approx = bin_cfg.get("collision", "none")
             if approx == "convexHull":
-                approx = "none"  # a hull would fill the bin; use the triangle mesh (fine for kinematic)
+                approx = "none"
         else:
             meshes = procedural_bin_meshes(bin_cfg["size_m"], float(bin_cfg.get("wall_thickness_m", 0.01)))
-            # triangle mesh (fine for a kinematic bin): convexHull / convexDecomposition colliders of these thin
-            # boxes let parts sink through the floor on the GB10 / Isaac Sim 6.0 build
             approx = "none"
         trimesh.util.concatenate(meshes).export(stl)
         write_bin_usd(usd, meshes, bin_cfg, approx)

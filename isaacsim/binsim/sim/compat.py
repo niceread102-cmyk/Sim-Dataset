@@ -1,9 +1,4 @@
-"""Isolation layer for Isaac Lab API differences across versions (2.x / 3.x).
-
-Everything version-sensitive the generator touches lives here: quaternion order, rigid-object
-read/write method names, tensor types (torch vs warp), segmentation info layout.
-If a first run fails inside Isaac, this is the file to adjust.
-"""
+"""Isaac Lab API differences between versions in one place: quaternion order, rigid object methods, tensor types, segmentation info."""
 from __future__ import annotations
 
 import math
@@ -16,7 +11,6 @@ _QUAT_ORDER = "wxyz"
 
 
 def detect_quat_order(setting: str = "auto") -> str:
-    """Ask Isaac Lab's own math utils which order it uses (robust to version changes)."""
     global _QUAT_ORDER
     if setting in ("wxyz", "xyzw"):
         _QUAT_ORDER = setting
@@ -32,16 +26,12 @@ def detect_quat_order(setting: str = "auto") -> str:
             _QUAT_ORDER = "xyzw"
         else:
             print(f"[WARN] could not infer quaternion order from {q}; assuming wxyz", flush=True)
-    except Exception as e:  # pragma: no cover - depends on Isaac Lab version
+    except Exception as e:
         print(f"[WARN] quaternion order detection failed ({e}); assuming wxyz", flush=True)
     return _QUAT_ORDER
 
 
 def disable_isaacsim_physics_warm_start():
-    """Isaac Lab 3.x loads physics and creates its tensor views itself in SimulationContext.reset(); Isaac Sim's
-    SimulationManager reloading physics on timeline PLAY deletes those views (invalid views / GPU hang).
-    isaaclab_physx rebinds `isaacsim.core.simulation_manager.SimulationManager` to its PhysxManager, but the
-    original class has already subscribed to PLAY, so import it from its impl module."""
     try:
         from isaacsim.core.simulation_manager.impl.simulation_manager import SimulationManager
     except ImportError:
@@ -64,7 +54,7 @@ def to_numpy(x) -> np.ndarray:
         return x
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
-    try:  # warp array
+    try:
         import warp as wp
         if isinstance(x, wp.array):
             return wp.to_torch(x).detach().cpu().numpy()
@@ -93,7 +83,6 @@ def _first_attr(obj, names):
 
 
 def write_pose(asset, pos: np.ndarray, quat_wxyz: np.ndarray, env_ids, device):
-    """pos (n,3) world, quat (n,4) wxyz."""
     pose = np.concatenate([pos, to_sim_quat(quat_wxyz)], axis=-1)
     fn = _first_attr(asset, ["write_root_pose_to_sim", "write_root_link_pose_to_sim"])
     fn(torch.as_tensor(pose, dtype=torch.float32, device=device), env_ids=env_ids)
@@ -106,7 +95,6 @@ def write_velocity(asset, lin: np.ndarray, ang: np.ndarray, env_ids, device):
 
 
 def read_pose(asset):
-    """-> (pos (N,3), quat_wxyz (N,4)) numpy, world frame."""
     d = asset.data
     pos = to_numpy(_first_attr(d, ["root_pos_w", "root_link_pos_w"]))
     quat = to_numpy(_first_attr(d, ["root_quat_w", "root_link_quat_w"]))
@@ -121,7 +109,6 @@ def read_velocity_torch(asset, device):
 
 
 def camera_pose_ros(cam):
-    """Camera world poses in the ROS/OpenCV optical convention -> (pos (N,3), quat_wxyz (N,4))."""
     d = cam.data
     pos = to_numpy(d.pos_w)
     quat = to_numpy(_first_attr(d, ["quat_w_ros", "quat_w_opencv"]))
@@ -129,8 +116,6 @@ def camera_pose_ros(cam):
 
 
 def use_usd_camera_view(cam):
-    """Make the camera's XformPrimView read/write poses through USD instead of Fabric. On the GB10 / Isaac Sim 6.0
-    build, Fabric world-matrix writes don't take effect: the camera stays at its spawn pose in render and readback."""
     view = getattr(cam, "_view", None)
     if view is not None and getattr(view, "_use_fabric", False):
         view._use_fabric = False
@@ -159,8 +144,6 @@ _SLOT_RE = re.compile(r"/part_(\d+)(?:/|$)")
 
 
 def instance_id_to_slot(info) -> dict[int, int]:
-    """{instance id -> pool slot} from the camera's instance-segmentation info (prim paths).
-    Key names moved between Isaac versions (the legacy script hit this too), so search broadly."""
     maps = _find_id_maps(info, [])
     lut: dict[int, int] = {}
     for m in maps:

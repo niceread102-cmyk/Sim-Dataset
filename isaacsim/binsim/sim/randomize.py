@@ -1,5 +1,4 @@
-"""Per-batch visual domain randomization through USD attributes (lights, part/bin materials).
-Materials are created once per (env, slot) and only their inputs change per batch."""
+"""Visual domain randomization per batch through USD attributes (lights, part and bin materials)."""
 from __future__ import annotations
 
 import numpy as np

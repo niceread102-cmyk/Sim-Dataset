@@ -1,15 +1,9 @@
-# The laser marker (assets/machine/laser_marker): everything about the machine itself, the same in every map. A map puts it somewhere:
-#   scene.machines:  - {name: laser_marker, pos_m: [x, y, z], rpy_deg: [roll, pitch, yaw], replaces: <prim of the map USD it stands in for>}
-# (any key of this file can be given there too: it wins in that map). robot_sim.py reads this file at start (restart it after a change; only
-# `fixtures:` is read again while it runs), isaacsim/machine/laser_marker.py reads `cycle:` (the launch starts it with a sequence:= in a map with this machine).
-# Positions below are in the frame of the machine (the base_link of the URDF, where the map puts it).
-# ROS 2: /laser_marker/joint_command (sensor_msgs/JointState: name + position in rad / m, a few joints at a time are fine) -> /laser_marker/joint_states, e.g.
-#   ros2 topic pub --once /laser_marker/joint_command sensor_msgs/msg/JointState "{name: [left_flip_joint], position: [3.14]}"
-urdf: laser_marker/urdf/laser_marker_v2.urdf   # below assets/machine/: v2 = lasermarker_v2.stl (4 carriers on the belt, 2 fixed seats at the flipper); the first version is laser_marker/urdf/laser_marker.urdf (with 5 carriers, see carriers:)
+# The laser marker (assets/machine/laser_marker): URDF, drives, seats, fixtures, belt, hands and the cycle of isaacsim/machine/laser_marker.py; the same in every map (a map places it in scene.machines).
+urdf: laser_marker/urdf/laser_marker_v2.urdf
 
-joint_pos:                    # start pose (rad / m), default 0: the jaws start open (upper limit 0.01 m: the pocket of 55.5 mm becomes 75.5 mm, a plate of 55.56 mm goes in), the flipper rotor at 90 deg (rest, out of the way: cycle.flipper.rest)
+joint_pos:
   right_flip_joint: 1.5708
-  left_flip_joint: 1.5708     # the left rotor (the two pairs of hands of the left station) rests at 90 deg too
+  left_flip_joint: 1.5708
   left_gripper_1_jaw_a_joint: 0.01
   left_gripper_1_jaw_b_joint: 0.01
   left_gripper_2_jaw_a_joint: 0.01
@@ -17,83 +11,81 @@ joint_pos:                    # start pose (rad / m), default 0: the jaws start 
   right_gripper_jaw_a_joint: 0.01
   right_gripper_jaw_b_joint: 0.01
 
-speed: 1.0                    # max speed of a joint = this x its URDF velocity limit (the joints that joint_speeds does not name)
-joint_speeds:                 # {joint-name regex: factor} instead of speed for these joints
-  "right_.*": 9.0             #   flipper rotor + its jaws (rotor 0.8 rad/s, jaws 0.03 m/s in the URDF)
-  "left_.*": 9.0              #   left rotor + the two pairs of hands (jaws)
-rotor_accel_rad_s2: 8.0       # rotors (flipper, hands): acceleration of start / stop
-jaw_accel_m_s2: 0.5           # jaws: acceleration of start / stop
-rotor_damping: 1.0            # rotor drives: damping (N*m*s/deg): it caps the speed of a rotor at (URDF effort 300 N*m) / damping = 300 deg/s (2.5 capped it at 120 deg/s = 2.1 rad/s: a factor above that did nothing)
+speed: 1.0
+joint_speeds:
+  "right_.*": 9.0
+  "left_.*": 9.0
+rotor_accel_rad_s2: 40.0
+jaw_accel_m_s2: 1.5
+rotor_damping: 0.5
 
-materials:                    # real metal (colour, metallic 1, a low roughness = gloss); a link contains the links below it, so the later rules win for their parts
-  - {links: ["base_link"], color: [0.66, 0.68, 0.71], metallic: 1.0, roughness: 0.38}               # frame: brushed aluminium
-  - {links: ["left_station", "right_station"], color: [0.72, 0.74, 0.77], metallic: 1.0, roughness: 0.30}   # the arms of the two stations
-  - {links: ["left_rotor", "right_rotor"], color: [0.50, 0.52, 0.56], metallic: 1.0, roughness: 0.28}      # rotors: darker aluminium
-  - {links: ["left_gripper_.*", "right_gripper_.*"], color: [0.36, 0.38, 0.41], metallic: 1.0, roughness: 0.20}   # jaws: steel
-  - {links: ["carrier_.*", "flipper_jig", "seat_.*"], color: [0.58, 0.60, 0.63], metallic: 1.0, roughness: 0.30}      # carriers and the attachment: steel
-  - {links: ["laser_station"], color: [0.52, 0.58, 0.64], metallic: 0.9, roughness: 0.25}                  # the housing of the laser: glossy painted steel
-collision_decomposition:      # {link-name regex: options}: the jaws (the pocket for the plate) are cut on a fine grid (32 hulls, 3 M voxels, 1 % error: PhysX defaults 500 k voxels and 10 % rounded the round pocket), the carriers and the seats with the defaults
+materials:
+  - {links: ["base_link"], color: [0.66, 0.68, 0.71], metallic: 1.0, roughness: 0.38}
+  - {links: ["left_station", "right_station"], color: [0.72, 0.74, 0.77], metallic: 1.0, roughness: 0.30}
+  - {links: ["left_rotor", "right_rotor"], color: [0.50, 0.52, 0.56], metallic: 1.0, roughness: 0.28}
+  - {links: ["left_gripper_.*", "right_gripper_.*"], color: [0.36, 0.38, 0.41], metallic: 1.0, roughness: 0.20}
+  - {links: ["carrier_.*", "flipper_jig", "seat_.*"], color: [0.58, 0.60, 0.63], metallic: 1.0, roughness: 0.30}
+  - {links: ["laser_station"], color: [0.52, 0.58, 0.64], metallic: 0.9, roughness: 0.25}
+collision_decomposition:
   "left_gripper_.*": {max_hulls: 32, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
   "right_gripper_.*": {max_hulls: 32, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
-  "carrier_.*": {sdf: 512}    # the jigs with thin-topped prongs: their exact shape as a signed distance field (a convex cut, even a fine one, puts hulls into the empty space beside the prongs and the plate lies on the tips); the plate that is picked has its exact shape too
+  "carrier_.*": {sdf: 512}
   "flipper_jig": {}
-  "seat_turn_over": {max_hulls: 64, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}   # the seat of the flipper (80 x 60 x 24 mm: a 2.4 mm pin tip,
-                                 #   the ring, two prongs into the windows of the plate): a fine cut like the jaws. Not an SDF: against the SDF plate its flat ring (27 k vertices) gave thousands of
-                                 #   contacts and the plate shook (like a flat box under seat_standard); the default cut (32 hulls, 10 %) filled the gaps between pin and prongs. (before "seat_.*")
+  "seat_turn_over": {max_hulls: 64, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
   "seat_.*": {}
-collision_friction: {"carrier_.*": 0.15}   # {link-name regex: friction}: the jigs of the belt are oiled (the prongs are sloped on purpose: a plate that is a little off in its angle slides down them into the windows); friction combine mode min = the plate does not add any
-fixtures:                     # the friction of those jigs, read again WHILE robot_sim.py RUNS (save the file: no restart)
-  friction: 0.08              #   at rest: low = the plate slides down the sloped prongs into the windows (oiled); high = it stays where it lies. Seated plates are held by the prongs either way
-  friction_moving: 0.5        #   while the belt moves: high = the plates ride along and do not slip off (needs about a / 9.8 = 0.05 at 0.5 m/s^2)
+collision_friction: {"carrier_.*": 0.15}
+fixtures:
+  friction: 0.08
+  friction_moving: 0.5
 
-carriers:                     # the carriers of the belt (v2: four, cut out of lasermarker_v2.stl) move in steps, stop-and-go, and run round: leaving at the -y end, back at the +y end
-  joints: [carrier_0_joint, carrier_1_joint, carrier_2_joint, carrier_3_joint]   # in the order of slots_m (v2: four carriers; the first version had carrier_4_joint too)
-  slots_m: [-0.83, -0.47, -0.11, 0.25]         # where each carrier stands at rest, y of the URDF (-0.83 and -0.47 are under the left hands): 0.36 m apart (first version: ... 0.25, 0.61)
-  window_m: [-1.01, 0.43]                      # the loop along y of the URDF: 4 x 0.36 = 1.44 m. Past -1.01 a carrier reappears at 0.43 (first version: [-1.01, 0.79], 5 carriers)
-  axis: [0, 1, 0]                              # the direction the carriers move along, in the frame of the machine (the carriers stand at x 0)
-  speed_mps: 0.2                               # m/s while the belt moves; one pitch = 0.36 m
-  accel_mps2: 0.5                              # how softly the belt starts and stops (m/s^2; plates slide above ~4.9)
-  topic: /laser_marker/carriers                # std_msgs/Int32: n > 0 = advance n pitches, 0 = stop. <topic>/moving (std_msgs/Bool, latched): True while it moves
+carriers:
+  joints: [carrier_0_joint, carrier_1_joint, carrier_2_joint, carrier_3_joint]
+  slots_m: [-0.83, -0.47, -0.11, 0.25]
+  window_m: [-1.01, 0.43]
+  axis: [0, 1, 0]
+  speed_mps: 0.2
+  accel_mps2: 0.5
+  topic: /laser_marker/carriers
 
-hands:                        # robot_sim.py looks whether a plate lies in front of each pair of hands of the left station (they take two plates at a time over to the conveyor)
-  slots: [0, 1]               #   the carrier slots under the two hand pairs (indices of carriers.slots_m: slots_m x carriers.axis in the frame of the machine)
-  radius_m: 0.03              #   a plate within this distance (m) of the slot counts ...
-  z_m: [0.9, 1.2]             #   ... with its centre between these heights (m above the base_link)
-  topic: /laser_marker/hand_plates   # std_msgs/Int32, 5 Hz: bit i = a plate lies in front of hand pair i (cycle.hands takes them)
+hands:
+  slots: [0, 1]
+  radius_m: 0.03
+  z_m: [0.9, 1.2]
+  topic: /laser_marker/hand_plates
 
-part_pose:                    # robot_sim.py publishes the pose of the part on the standard seat (put there by the robot, or turned over to it by the flipper): the robot picks it up again from there (transfer: of the sequence)
-  seat_m: [0.0, 0.7103]       #   x y of seat_standard (laser_marker_v2) in the frame of the machine (in SIDE_PLATE_MAP = world -0.512 -0.658, transfer.pick of configs/sequence/side_plate.yaml)
-  radius_m: 0.08              #   the part nearest to it within this distance (m); none there = nothing is published
-  topic: /target_part_pose    #   geometry_msgs/Pose in the world, 5 Hz
+part_pose:
+  seat_m: [0.0, 0.7103]
+  radius_m: 0.08
+  topic: /target_part_pose
 
-cycle:                        # isaacsim/machine/laser_marker.py
-  flipper:                    #   the right station: brings a turned-over plate from the turn_over seat to the standard seat
+cycle:
+  flipper:
     rotor: right_flip_joint
     jaws: [right_gripper_jaw_a_joint, right_gripper_jaw_b_joint]
-    rest: 1.5708              #   rad: standing up, out of the way of the robot and the plates (= joint_pos)
-    grab: 3.14159             #   rad: the open jaws come round the plate on the turn_over seat
-    release: 0.0              #   rad: the plate is over the standard seat (turned over)
-    close_mm: 6.0             #   how far PAST the pocket the jaws are told to close (mm; max 10): the harder they press the plate (5 mm = ~27 N per jaw, 7 mm = ~38 N)
-  hands:                      #   the left station: the two pairs of hands move together on one rotor
+    rest: 1.5708
+    grab: 3.14159
+    release: 0.0
+    close_mm: 7.0
+  hands:
     rotor: left_flip_joint
     jaws: [left_gripper_1_jaw_a_joint, left_gripper_1_jaw_b_joint, left_gripper_2_jaw_a_joint, left_gripper_2_jaw_b_joint]
-    rest: 1.5708              #   rad (= joint_pos)
-    grab: 0.0                 #   rad: the plates on the belt
-    release: 3.14159          #   rad: over the jigs of the conveyor
+    rest: 1.5708
+    grab: 0.0
+    release: 3.14159
     close_mm: 6.0
-    still_s: 1.0              #   s the two plates have to lie in front of the hands before they take them (the belt has stopped, the plates are at rest)
-  jaw_open: 0.01              # m: open = the URDF upper limit (0 = the 55.5 mm pocket)
-  slots: 4                    # carriers of the belt (slot 0 = leftmost, y -0.83 m ... 3 = y 0.25 m)
-  slot_place: 3               # where the robot puts the plate down (transfer.place of the sequence)
-  stall_frames: 25            # simulation frames without motion after which a jaw / rotor that does not arrive counts as blocked (= holding the plate): the wait after every close
-  stall_move: 0.0002          # m or rad: no more move than this for stall_frames = stopped
-  flip_tol: 0.01              # rad: a rotor has arrived
-  jaw_tol: 0.0005             # m: a jaw has arrived
-  release_tol: 0.001          # rad: the rotor has to be this close to the release angle before the jaws let go (0.01 let go ~0.005 rad = 3 mm short: the plate landed on the edge of a prong)
-  timeouts_s: {flip: 90.0, jaws: 30.0, belt: 120.0, machine: 60.0}   # per step (wall clock: the simulation may run slower than real time)
+    still_s: 1.0
+  jaw_open: 0.01
+  slots: 4
+  slot_place: 3
+  stall_frames: 5
+  stall_move: 0.0002
+  flip_tol: 0.03
+  jaw_tol: 0.0005
+  release_tol: 0.005
+  timeouts_s: {flip: 90.0, jaws: 30.0, belt: 120.0, machine: 60.0}
   topics:
-    ready: /laser_marker/ready              # std_msgs/Empty: the plate lies at the standard seat (the robot picks it up again)
-    transfer_done: /transfer_done           # std_msgs/Empty from control/robot_sequence.py: the plate lies on the carrier of slot_place
-    hands_done: /laser_marker/hands_done    # std_msgs/Empty: the left hands have let go of their plates on the conveyor (trigger_topic of conveyor.yaml)
-    hands_release: /laser_marker/hands_release   # std_msgs/Empty: the left hands are at the release angle, about to open (attach.trigger_topic of conveyor.yaml)
-    sequence_done: /sequence_done           # std_msgs/String from control/robot_sequence.py: the state of the part it placed (standard | turn_over)
+    ready: /laser_marker/ready
+    transfer_done: /transfer_done
+    hands_done: /laser_marker/hands_done
+    hands_release: /laser_marker/hands_release
+    sequence_done: /sequence_done

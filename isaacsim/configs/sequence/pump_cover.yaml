@@ -1,4 +1,68 @@
-# robot_sequence.py for the pump cover map (PUMP_COVER_MAP): the same task as the side plate map (same pallets, same place poses), another part and box.
-#   ros2 launch robot.launch.py map:=PUMP_COVER_MAP [robot:=<robot>] sequence:=pump_cover
-# Change here what differs for the pump cover (place poses, via, approach distance, ...): the rest is side_plate.yaml.
-extends: side_plate
+# Sequence of the pump cover map (PUMP_COVER_MAP) with m20_35_18d_vacuum: control/auto_control.py empties the crates one by one (the poses of the parts come from robot_sim.py, TCP = part pose, tool down 180 0 -yaw), the cup sucks the cover, it is carried at a constant height to the jig and hung on it.
+# Poses are TCP poses (cup tip) in the world frame of the map.   ros2 launch robot.launch.py map:=PUMP_COVER_MAP sequence:=pump_cover
+#extends: side_plate
+robot: m20_35_18d_vacuum
+target: tcp
+
+poses:
+  home: [0.4674, -0.7653, 1.4855, 180, 0, 45]
+
+  carry_z: 1.55
+  place_offset: 0.2
+
+  place: [-0.7549, 0.0007, 1.0836, 180, 0, -138.9]
+
+  crates:
+
+    - {centre: [0.6205, -0.7581], home: [0.4674, -0.7653, 1.4855, 180, 0, 45]}
+    - {centre: [0.8800, -1.0177], home: [0.7269, -1.0249, 1.4855, 180, 0, 45]}
+    - {centre: [1.1396, -1.2772], home: [0.9865, -1.2844, 1.4855, 180, 0, 45]}
+    - {centre: [0.9896, -0.3890], home: [0.8365, -0.3962, 1.4855, 180, 0, 45]}
+    - {centre: [1.2492, -0.6485], home: [1.0961, -0.6557, 1.4855, 180, 0, 45]}
+    - {centre: [1.5087, -0.9081], home: [1.3556, -0.9153, 1.4855, 180, 0, 45]}
+
+    - {centre: [0.6205, 0.8754], home: [0.4674, 0.8682, 1.4855, 180, 0, 45]}
+    - {centre: [0.8800, 0.6158], home: [0.7269, 0.6086, 1.4855, 180, 0, 45]}
+    - {centre: [1.1396, 0.3563], home: [0.9865, 0.3491, 1.4855, 180, 0, 45]}
+    - {centre: [0.9896, 1.2445], home: [0.8365, 1.2373, 1.4855, 180, 0, 45]}
+    - {centre: [1.2492, 0.9850], home: [1.0961, 0.9778, 1.4855, 180, 0, 45]}
+    - {centre: [1.5087, 0.7254], home: [1.3556, 0.7182, 1.4855, 180, 0, 45]}
+
+crate:
+  size: [0.4516, 0.3042]
+  yaw: 45
+  margin: 0.02
+  floor_z: 1.0849
+  #rank_weights: {flat: 3.0, height: 1.0, centre: 0.5}
+  rank_weights: {flat: 1.0, height: 100.0, centre: 0.0}
+  height_scale_m: 0.2
+  layers: 6
+  layer_pitch_m: 0.190
+  per_pallet: 6
+  clear_topic: /crate_clear
+  next_topic: /crate_next
+  ready_topic: /crate_ready
+  active_topic: /crate_active
+  parts_request_topic: /crate_parts_request
+  parts_topic: /crate_parts
+  parts_remove_topic: /crate_parts_remove
+  remove_placed: false
+  remove_radius_m: 0.08
+  conveyor_topic: /pump_cover_conveyor_1/carriers
+  settle_s: 1.0
+
+trajectory:
+  place: pan
+  home: pan
+  approach: pan
+  crate: pan
+  pan_turn: wrist
+  lift_z: 1.35
+  pan_step: 0.10
+  climb_deg: 60
+fuse_moves: true
+fuse_joint_step: 0.05
+
+waits:
+  open_gripper: 0.5
+  release: 0.5

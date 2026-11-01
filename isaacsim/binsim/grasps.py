@@ -1,14 +1,4 @@
-"""Grasp labels: per-part grasp library -> scene grasps with collision/approach checks.
-
-Gripper frame: origin = TCP (suction contact point or jaw center), +Z = approach direction
-(points INTO the part), the gripper body extends toward -Z. Grasp poses are 4x4 T_part_grasp.
-
-Collision model (numpy only, no FCL):
-  * gripper = union of primitives (z-aligned cylinders / boxes) in the gripper frame, extended
-    backwards along -Z by `approach_clearance_m` to cover the approach motion;
-  * scene   = surface points sampled on every part in its GT pose (incl. the target itself)
-            + the bin, modeled analytically as floor + walls around the inner volume.
-"""
+"""Grasp labels: per-part grasp library -> grasps of a scene with collision and approach checks (numpy only)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,9 +12,9 @@ from .transforms import axis_angle_to_mat, make_T, rpy_to_mat
 
 @dataclass
 class GraspLibrary:
-    kind: str                  # suction | parallel_jaw
-    T: np.ndarray              # (G,4,4) T_part_grasp
-    width: np.ndarray          # (G,) jaw opening (0 for suction)
+    kind: str
+    T: np.ndarray
+    width: np.ndarray
 
 
 def _frame_from_approach(p, approach) -> np.ndarray:
@@ -36,7 +26,6 @@ def _frame_from_approach(p, approach) -> np.ndarray:
 
 
 def sample_suction_grasps(mesh: trimesh.Trimesh, gripper_cfg, num: int, rng, dense: int = 20000) -> list[np.ndarray]:
-    """Contact points on flat patches that fully support the cup (seal check)."""
     sc = gripper_cfg.get("suction", {}) or {}
     r = float(sc.get("cup_radius_m", 0.01))
     tol = float(sc.get("max_planarity_err_m", 0.0015))
@@ -45,7 +34,7 @@ def sample_suction_grasps(mesh: trimesh.Trimesh, gripper_cfg, num: int, rng, den
     pts, fid = trimesh.sample.sample_surface(mesh, dense, seed=seed)
     nrm = mesh.face_normals[fid]
     density = dense / mesh.area
-    need = 0.75 * density * np.pi * r * r   # the disk under the cup must be covered by surface
+    need = 0.75 * density * np.pi * r * r
     order = rng.permutation(dense)
     out = []
     for i in order:
@@ -54,13 +43,13 @@ def sample_suction_grasps(mesh: trimesh.Trimesh, gripper_cfg, num: int, rng, den
         p, n = pts[i], nrm[i]
         d = pts - p
         near = np.einsum("ij,ij->i", d, d) < r * r
-        near &= (nrm @ n) > max_dev             # same-facing surface only (not the far side)
+        near &= (nrm @ n) > max_dev
         if near.sum() < need:
-            continue                             # cup overhangs an edge / hole
+            continue
         if np.abs(d[near] @ n).max() > tol:
-            continue                             # not flat enough to seal
+            continue
         if any(np.linalg.norm(p - q[:3, 3]) < r for q in out):
-            continue                             # keep candidates spread out
+            continue
         out.append(_frame_from_approach(p, -n))
     return out
 
@@ -96,7 +85,6 @@ def gripper_primitives(gripper_cfg, width: float, clearance: float) -> list[dict
         off = width / 2 + fy / 2
         prims += [{"type": "box", "center_m": [0, s * off, 0], "size_m": [fx, fy, fz]} for s in (-1, 1)]
         prims.append({"type": "box", "center_m": [0, 0, -fz / 2 - pz / 2], "size_m": [px, py, pz]})
-    # sweep backwards along -Z (approach motion)
     for p in prims:
         if p["type"] == "cylinder":
             z0, z1 = p["z_m"]
@@ -123,7 +111,6 @@ def points_in_primitives(pts_g: np.ndarray, prims: list[dict]) -> np.ndarray:
 
 
 def primitive_surface_points(prims: list[dict], n_per: int = 200) -> np.ndarray:
-    """Points on the primitives (used for the analytic bin check)."""
     out = []
     for p in prims:
         if p["type"] == "cylinder":
@@ -152,8 +139,8 @@ def _bin_collision(pts_bin: np.ndarray, bin_geom: BinGeom, rim_z: float) -> bool
 
 @dataclass
 class SceneGrasp:
-    part: int                   # index into the scene's part list (== BOP gt index)
-    T_w: np.ndarray             # 4x4 world (bin-frame) grasp pose
+    part: int
+    T_w: np.ndarray
     width: float
     approach_angle_deg: float
     valid: bool
@@ -163,12 +150,10 @@ class SceneGrasp:
 def evaluate_scene(part_T_bin: list[np.ndarray], part_types: list[int], libraries: list[GraspLibrary],
                    part_points: list[np.ndarray], bin_geom: BinGeom, rim_z: float, gripper_cfg, grasp_cfg,
                    candidate_mask: np.ndarray | None = None, rng=None) -> list[SceneGrasp]:
-    """All poses in the BIN frame (z up). `candidate_mask[i]` limits which parts get grasps."""
     rng = rng or np.random.default_rng(0)
     max_ang = float(grasp_cfg.get("max_approach_angle_deg", 45))
     clearance = float(grasp_cfg.get("approach_clearance_m", 0.05))
     max_per = int(grasp_cfg.get("max_grasps_per_part", 64))
-    # scene point cloud with owner index
     world_pts, owner = [], []
     for i, (T, ti) in enumerate(zip(part_T_bin, part_types)):
         world_pts.append(part_points[ti] @ T[:3, :3].T + T[:3, 3])
@@ -196,7 +181,6 @@ def evaluate_scene(part_T_bin: list[np.ndarray], part_types: list[int], librarie
                 prims = gripper_primitives(gripper_cfg, width, clearance)
                 prim_cache[width] = (prims, primitive_surface_points(prims))
             prims, prim_pts = prim_cache[width]
-            # scene points -> gripper frame (prefilter by distance to the TCP)
             R, t = Tg[:3, :3], Tg[:3, 3]
             reach = 0.3
             d = world_pts - t
@@ -217,8 +201,6 @@ def evaluate_scene(part_T_bin: list[np.ndarray], part_types: list[int], librarie
 
 
 def pick_topmost(part_T_bin, part_types, part_points, visib: np.ndarray, grasps: list[SceneGrasp], min_visib: float):
-    """Highest (by top surface) part that is visible enough and has a valid grasp.
-    Returns (part_index, best SceneGrasp) or (None, None)."""
     valid_by_part: dict[int, list[SceneGrasp]] = {}
     for g in grasps:
         if g.valid:

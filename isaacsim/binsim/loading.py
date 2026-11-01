@@ -1,17 +1,4 @@
-"""Initial part placement for a bin (pure numpy, simulator-independent).
-
-All positions are in the BIN frame: origin at the bin's bottom center, +Z up, inner volume
-x in [-ix/2, ix/2], y in [-iy/2, iy/2], z from `floor_z` up. Physics does the rest (drop + settle).
-
-Three modes:
-  random : parts spawn above the floor with no initial overlap (vertical-cylinder bounds),
-           then fall into a cluster.
-  layers : ordered grid stacks in each part's `layer_rpy_deg` orientation with jitter,
-           partially filled top layer; overflow parts are dropped on top.
-  stack  : parts placed (not dropped) in loose layers, each in its `layer_rpy_deg` orientation
-           (e.g. front side up) with a random yaw at a random free spot; a full layer starts the
-           next one on top. Upper parts bridge the gaps below and settle overlapping and tilted.
-"""
+"""Initial part placement in a bin (numpy only, bin frame): random, layers or stack; physics drops and settles them."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,20 +12,16 @@ from .transforms import axis_angle_to_mat, mat_to_quat, random_quaternions, rpy_
 @dataclass
 class PartGeom:
     name: str
-    extents: np.ndarray          # (3,) bbox size in the part frame, meters (model is centered)
-    radius: float                # bounding-sphere radius, meters
-    layer_R: np.ndarray = field(default_factory=lambda: np.eye(3))  # resting orientation for layers
-    mesh: object = None          # trimesh in the part frame (meters), optional: stack mode rests parts on its shape
+    extents: np.ndarray
+    radius: float
+    layer_R: np.ndarray = field(default_factory=lambda: np.eye(3))
+    mesh: object = None
     _profiles: dict = field(default_factory=dict, repr=False)
 
     def layer_extents(self) -> np.ndarray:
-        """Axis-aligned extents after applying layer_R."""
         return np.abs(self.layer_R) @ self.extents
 
     def profile(self, cell: float, flip: bool = False):
-        """The part lying in its layer orientation (turned over about x if `flip`) as points on a `cell` grid of its
-        xy plane: (xy (N, 2), underside height (N,), top height (N,), height of the part origin), heights above the
-        part's lowest point. From the mesh surface (sampled once) if there is one, else from the bounding box."""
         key = (cell, flip)
         if key not in self._profiles:
             R = self.layer_R @ (axis_angle_to_mat([1, 0, 0], np.pi) if flip else np.eye(3))
@@ -62,20 +45,18 @@ class PartGeom:
 
 @dataclass
 class BinGeom:
-    inner_size: np.ndarray       # (3,) usable inner volume, meters
-    floor_z: float               # inner floor height in the bin frame
+    inner_size: np.ndarray
+    floor_z: float
 
 
 @dataclass
 class Placement:
     type_idx: int
-    pos: np.ndarray              # (3,) bin frame
-    quat: np.ndarray             # (4,) wxyz, bin frame
+    pos: np.ndarray
+    quat: np.ndarray
 
 
 def sample_counts(parts_cfg, rng: np.random.Generator, loading_cfg=None) -> list[int]:
-    """Parts per type for one scene. loading.partial_fill: with probability `prob` the whole pile is scaled down to a
-    random fraction in [min_fraction, 1] (a bin the robot has partly emptied)."""
     out = []
     for p in parts_cfg:
         lo, hi = count_range(p)
@@ -95,7 +76,6 @@ def choose_mode(loading_cfg, rng) -> str:
 
 
 def plan_scene(counts, geoms, bin_geom: BinGeom, loading_cfg, rng, mode: str | None = None):
-    """Returns (placements, mode)."""
     mode = mode or choose_mode(loading_cfg, rng)
     order = np.concatenate([np.full(c, i, dtype=int) for i, c in enumerate(counts)]) if counts else np.zeros(0, int)
     rng.shuffle(order)
@@ -114,17 +94,11 @@ def _yaw(rng, max_deg=180.0):
 
 
 def _bounds(g: PartGeom, R: np.ndarray):
-    """Vertical-cylinder bound (radius_xy, half_height) of a part in orientation R."""
     ext = np.abs(R) @ g.extents
     return 0.5 * float(np.hypot(ext[0], ext[1])), 0.5 * float(ext[2])
 
 
 def _plan_stack(order, geoms, bin_geom, loading_cfg, rng):
-    """loading.stack: parts put down one by one onto the pile (a height map of the bin on a stack.cell_m grid), each
-    in its layer orientation (e.g. front side up) with a random yaw (stack.yaw_deg), turned over with stack.flip_prob.
-    Of stack.tries random spots inside the walls the lowest is taken, like filling a bin by hand; the part is put down
-    flat stack.gap_m above the highest point under its real shape (PartGeom.mesh, else its box): placed, not dropped.
-    Parts that bridge others tilt into the gaps when physics settles the pile."""
     scfg = loading_cfg.get("stack", {})
     margin = float(loading_cfg.get("wall_margin_m", 0.01))
     gap = float(scfg.get("gap_m", 0.003))
@@ -134,7 +108,7 @@ def _plan_stack(order, geoms, bin_geom, loading_cfg, rng):
     cell = float(scfg.get("cell_m", 0.003))
     ix, iy, _ = bin_geom.inner_size
     half_bin = np.array([ix / 2, iy / 2])
-    pile = np.full((int(np.ceil(ix / cell)), int(np.ceil(iy / cell))), float(bin_geom.floor_z))  # top of the pile
+    pile = np.full((int(np.ceil(ix / cell)), int(np.ceil(iy / cell))), float(bin_geom.floor_z))
     out = []
     for ti in order:
         g = geoms[ti]
@@ -144,11 +118,11 @@ def _plan_stack(order, geoms, bin_geom, loading_cfg, rng):
             xy0, under, over, origin = g.profile(cell / 2, flip)
             a = rng.uniform(-np.deg2rad(yaw_max), np.deg2rad(yaw_max))
             pts = xy0 @ np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
-            lo = -half_bin + margin - pts.min(axis=0)     # shift range that keeps the part inside the walls
+            lo = -half_bin + margin - pts.min(axis=0)
             hi = half_bin - margin - pts.max(axis=0)
             xy = np.where(lo < hi, lo + rng.random(2) * (hi - lo), (lo + hi) / 2)
             idx = np.clip(np.floor((pts + xy + half_bin) / cell).astype(int), 0, np.array(pile.shape) - 1)
-            z = float(np.max(pile[idx[:, 0], idx[:, 1]] - under)) + gap  # underside just clears the pile
+            z = float(np.max(pile[idx[:, 0], idx[:, 1]] - under)) + gap
             if best is None or z < best[0]:
                 best = (z, a, flip, xy, idx, over, origin)
         z, a, flip, xy, idx, over, origin = best
@@ -167,11 +141,10 @@ def _plan_random(order, geoms, bin_geom, loading_cfg, rng, existing=()):
     orient = rcfg.get("orientation", "uniform")
     ix, iy, _ = bin_geom.inner_size
 
-    # already-placed items as (xy, z, r_xy, half_h)
     placed = []
     for p in existing:
         g = geoms[p.type_idx]
-        r, h = g.radius, g.radius  # conservative for layer parts too
+        r, h = g.radius, g.radius
         placed.append((p.pos[:2], p.pos[2], r, h))
 
     out = []
@@ -180,7 +153,7 @@ def _plan_random(order, geoms, bin_geom, loading_cfg, rng, existing=()):
         g = geoms[ti]
         if orient == "uniform":
             q = quats[k]
-            r_xy = h = g.radius  # any orientation fits in the bounding sphere
+            r_xy = h = g.radius
         else:
             R = _yaw(rng) @ g.layer_R
             if orient == "flat" and rng.random() < 0.5:
@@ -194,8 +167,8 @@ def _plan_random(order, geoms, bin_geom, loading_cfg, rng, existing=()):
         for pxy, pz, pr, ph in placed:
             d = float(np.linalg.norm(xy - pxy))
             if d < r_xy + pr:
-                if orient == "uniform":  # bounding spheres: rest on the other sphere (they just touch), much lower
-                    z = max(z, pz + float(np.sqrt((r_xy + pr) ** 2 - d ** 2)) + 0.002)  # columns than stacking
+                if orient == "uniform":
+                    z = max(z, pz + float(np.sqrt((r_xy + pr) ** 2 - d ** 2)) + 0.002)
                 else:
                     z = max(z, pz + ph + h + 0.002)
         placed.append((xy, z, r_xy, h))
@@ -217,7 +190,6 @@ def _plan_layers(order, geoms, bin_geom, loading_cfg, rng):
         return [], order
 
     types = sorted(set(order.tolist()))
-    # grid cell = largest footprint among present types, grown for worst-case yaw jitter
     j = np.deg2rad(yaw_j)
     cells = []
     for t in types:
@@ -273,9 +245,6 @@ def bin_geom_from_cfg(bin_cfg) -> BinGeom:
 
 
 def in_bin(pos_bin: np.ndarray, bin_geom: BinGeom, margin: float, rim_clearance: float | None = None) -> np.ndarray:
-    """(N,3) bin-frame part centres -> bool mask of parts inside the inner volume (+margin).
-    rim_clearance: parts whose centre is higher than (rim top - rim_clearance) do not count as inside (caught on the
-    rim / lying on a wall); None = anything up to 0.5 m above the rim counts."""
     ix, iy, iz = bin_geom.inner_size
     p = np.atleast_2d(pos_bin)
     top = bin_geom.floor_z + iz + (0.5 if rim_clearance is None else -float(rim_clearance))
@@ -284,26 +253,23 @@ def in_bin(pos_bin: np.ndarray, bin_geom: BinGeom, margin: float, rim_clearance:
 
 
 def shake_schedule(loading_cfg, rng) -> list[int]:
-    """Settle-step indices at which random velocity kicks are applied."""
     sh = loading_cfg.get("shake", {})
     n = int(sh.get("impulses", 0))
     if n <= 0:
         return []
     min_steps = int(loading_cfg.get("settle", {}).get("min_steps", 60))
-    # kick early-ish so the pile has time to settle afterwards; spread over the first ~min_steps*2
     span = max(min_steps * 2, n * 10)
     steps = np.sort(rng.choice(np.arange(10, 10 + span), size=n, replace=False))
     return steps.tolist()
 
 
 def bin_oscillation_offset(t: float, loading_cfg, phase: np.ndarray) -> np.ndarray:
-    """(num_envs, 3) bin xy displacement at time t for the kinematic bin wiggle."""
     osc = loading_cfg.get("shake", {}).get("bin_oscillation", {}) or {}
     amp, freq, dur = float(osc.get("amp_m", 0.0)), float(osc.get("freq_hz", 3.0)), float(osc.get("duration_s", 0.0))
     out = np.zeros((len(phase), 3))
     if amp <= 0 or t > dur:
         return out
-    fade = 0.5 * (1 - np.cos(2 * np.pi * min(t / dur, 1.0)))  # smooth in/out
+    fade = 0.5 * (1 - np.cos(2 * np.pi * min(t / dur, 1.0)))
     w = 2 * np.pi * freq
     out[:, 0] = amp * fade * np.sin(w * t + phase)
     out[:, 1] = amp * fade * np.sin(w * t + 1.7 * phase)

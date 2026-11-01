@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""Quick check: can the robot put the tool straight down to the parts (or the crate floors) of the top layer of the pallets of a map?
+"""check_reach.py: can the robot put the tool straight down to the crates of the top layer of a map? No Isaac Sim, no ROS (URDF, ik_node.yaml, the map).
 
     python3 check_reach.py map:=<map> [robot:=<name>] [platform:=<m>] [tool:=<m>] [--sweep]
 
-No Isaac Sim, no ROS: only the URDF of the robot (kinematics, joint limits), its bringup/<robot>/config/ik_node.yaml (end frame, TCP), its start pose
-(joint_pos of configs/robot/<robot>.yaml) and scene.pallets of the map (configs/map/<map>.yaml); the robot stands where the map puts it
-(scene.robot_pose), robot:= defaults to scene.robot of the map.
-  platform    height of the robot base (m); default: where it stands in the map
-  tool        flange (ee_link of ik_node.yaml) to the TCP (m); default: the length of tcp_offset of ik_node.yaml
-For every distance r of the targets from the axis of the robot (smallest .. largest of the top layer: the parts in the crates, or the crate floors
-when the crates are empty) the tool goes straight down from the approach pose to the target with the tool vertical (J1, J4, J6 free). Printed: the
-smallest |J5| on the way (a wrist at J5 = 0 is singular: the straight line breaks), the smallest distance of J2 / J3 to their limits, and a verdict.
-|J5| >= 30 deg is fine, 15..30 marginal, below it the line fails. For a 6-axis arm with a wrist: J2, J3, J5 = the 2nd, 3rd and 5th joint of the chain.
---sweep prints the verdict for base heights around the one of the map (rows) and tool lengths (columns). The reachable tool-down poses of the arm are
-computed once (about a minute) and kept in assets_cache/, then every check takes a second.
+Prints per distance from the robot axis the smallest |J5| on the way down and the joint limit margin; --sweep tries base heights and tool lengths.
 """
 import hashlib
 import math
@@ -39,7 +29,6 @@ def arg(name, default=None):
 
 
 def tool_down_poses(urdf, chain):
-    """(r, z, J2, J3, J5) of the flange origin over a 1 deg grid of J2 J3 J5 (J1 = J4 = J6 = 0) where the flange z axis (tool) points down within 1 deg"""
     key = hashlib.sha1(urdf.path.read_bytes()).hexdigest()[:10]
     cache = HERE / "assets_cache" / f"reach_{urdf.path.stem}_{chain[-1].find('child').get('link')}_{key}.npy"
     if cache.is_file():
@@ -66,8 +55,6 @@ def tool_down_poses(urdf, chain):
 
 
 def insert_line(tree, F, r, h, tool, z_lo, z_hi, lim, home, tol=0.02):
-    """Tool vertical at distance r from z_hi down to z_lo (world TCP z), base at height h, TCP `tool` below the flange; home = J2 J3 J5 of the start
-    pose (the branch the sequence stays on). Returns (smallest |J5| deg, smallest distance of J2 / J3 to the limits deg), None if a pose on the way cannot be reached"""
     prev, j5, margin = None, 999.0, 999.0
     for z in np.linspace(z_hi, z_lo, 21):
         idx = tree.query_ball_point([r, z - h + tool], tol)
@@ -76,7 +63,7 @@ def insert_line(tree, F, r, h, tool, z_lo, z_hi, lim, home, tol=0.02):
         cand = F[idx]
         q = cand[np.argmin(np.abs(cand[:, 2:5] - (home if prev is None else prev)).max(1))][2:5]
         if prev is not None and np.degrees(np.abs(q - prev).max()) > 6.0:
-            return None                                      # the joints jump: the straight line cannot follow
+            return None
         prev = q
         j5 = min(j5, abs(math.degrees(q[2])))
         margin = min(margin, math.degrees(q[0] - lim[0][1]), math.degrees(lim[1][1] - q[0]), math.degrees(q[1] - lim[0][2]), math.degrees(lim[1][2] - q[1]))
@@ -88,12 +75,10 @@ def verdict(res):
 
 
 def targets(scene, robot_xy, robot_yaw_deg):
-    """distance from the robot axis, azimuth in the robot frame and TCP z of the targets of the top layer (scene.pallets of the map): the parts,
-    or the floors of the crates when they are empty. Returns (r, az, z, what)"""
     pc = scene["pallets"]
     part = (yaml.safe_load(open(os.path.join(sim_config.OBJECTS_DIR, f"{pc['part']}.yaml"))) if pc.get("part") else None)
     if part:
-        import trimesh                                       # only for the size of the part (the conda env `sim` has it)
+        import trimesh
         mesh = trimesh.load(os.path.normpath(os.path.join(sim_config.OBJECTS_DIR, part["mesh"])), force="mesh")
         ext = mesh.extents * {"m": 1.0, "mm": 1e-3, "cm": 1e-2, "in": 0.0254}[part.get("units", "mm")]
     crate = {**pc["crate"], "usd": None}
@@ -104,7 +89,7 @@ def targets(scene, robot_xy, robot_yaw_deg):
     for seed in range(3):
         plan = plan_pallets(cfg, ext if part else [0.01, 0.01, 0.01], (part or {}).get("layer_rpy_deg"), np.random.default_rng(seed))
         points = [(p["pos"], p["layer"]) for p in plan["parts"]]
-        if not points:                                       # empty crates: down to the floor of every crate
+        if not points:
             what = "crate floors"
             points = [(c["pos"] + np.array([0.0, 0.0, float(crate["floor_z_m"])]), c["layer"]) for c in plan["crates"]]
         top = max(layer for _, layer in points)
@@ -120,7 +105,7 @@ def targets(scene, robot_xy, robot_yaw_deg):
 
 def main():
     try:
-        robot, map_name = sim_config.with_current(arg("robot"), arg("map"))   # without robot:= / map:= the ones of the robot_sim.py started last
+        robot, map_name = sim_config.with_current(arg("robot"), arg("map"))
         scene = sim_config.scene_of(map_name)
         robot = sim_config.pick_robot(robot, scene)
     except ValueError as e:
@@ -137,7 +122,7 @@ def main():
     mov = [j for j in chain if j.get("type") in m.MOVABLE]
     if len(mov) != 6:
         sys.exit(f"{robot}: {len(mov)} joints from {urdf.base_link()} to {ik['ee_link']}: check_reach.py is for a 6-axis arm with a wrist")
-    jp = ry.get("joint_pos") or {}                           # the start pose: the branch the sequence stays on (elbow, wrist)
+    jp = ry.get("joint_pos") or {}
     seed = ([next((float(v) for k, v in jp.items() if re.fullmatch(str(k), j.get("name"))), 0.0) for j in mov] if jp
             else [math.radians(float(v)) for v in ik["ik_seed_deg"]])
     home = np.array([seed[1], seed[2], seed[4]])

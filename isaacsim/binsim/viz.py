@@ -1,8 +1,4 @@
-"""Visual reports (PIL + numpy only).
-
-bin_panel():  [ RGB + per-part XYZ axes + top-most part arrow/label | colorized depth | instance masks ]
-              with a per-part 6DOF table underneath.
-"""
+"""Visual reports (PIL + numpy): RGB with part axes, colorized depth, instance masks and a 6DOF table per bin."""
 from __future__ import annotations
 
 import numpy as np
@@ -27,18 +23,12 @@ def _font(size: int):
 
 
 def depth_preview(depth_m: np.ndarray, near_m: float, far_m: float) -> np.ndarray:
-    """8-bit view of a depth map with ONE fixed mapping for every image (no per-image stretch): near_m -> 255 (white),
-    far_m -> 1, no depth (0) -> 0 (black). depth_mm = far_mm - (v - 1) / 254 * (far_mm - near_mm) for v >= 1."""
     d = np.asarray(depth_m, np.float64)
     v = 1 + np.round(254 * np.clip((far_m - d) / max(far_m - near_m, 1e-9), 0, 1))
     return np.where(d > 0, v, 0).astype(np.uint8)
 
 
 def depth_preview_phoxi(depth_m: np.ndarray) -> np.ndarray:
-    """16-bit view made like the PhoXi GigE-V sample viewer (photoneo harvesters advanced/show_confidence_map.py ->
-    visualizer.process_for_visualisation: cv2.normalize(depth, 0, 65535, NORM_MINMAX).astype(uint16)): each image
-    stretched from its own min to max, so no depth (0, the min) = black, near = dark, far = bright. Compare with the
-    real Output/depth PNGs; the fixed-scale depth_preview is the one to compare images with each other."""
     d = np.asarray(depth_m, np.float32)
     lo, hi = float(d.min()), float(d.max())
     if hi <= lo:
@@ -47,21 +37,16 @@ def depth_preview_phoxi(depth_m: np.ndarray) -> np.ndarray:
 
 
 def depth_preview_relief(depth_m: np.ndarray, sigma_px: float = 6.0, range_mm: float = 1.5) -> np.ndarray:
-    """8-bit view that shows small height differences (the relief of a part, e.g. the face of a coin), which the per-image
-    min-max stretch of depth_preview_phoxi hides: the depth minus its own local mean (gaussian, sigma_px; no-depth pixels
-    left out of the mean), grey 128 = same height as around it, +-range_mm -> white / black (sharper steps such as part
-    outlines saturate). No depth (0) -> 0. Only for looking at the data; the stored depth is what a model gets."""
     from scipy.ndimage import gaussian_filter
     d = np.asarray(depth_m, np.float64)
     valid = d > 0
     w = gaussian_filter(valid.astype(np.float64), sigma_px)
     mean = gaussian_filter(np.where(valid, d, 0.0), sigma_px) / np.maximum(w, 1e-6)
-    v = 128 + np.clip((mean - d) * 1000.0 / range_mm, -1, 1) * 126       # nearer than the surroundings = brighter
+    v = 128 + np.clip((mean - d) * 1000.0 / range_mm, -1, 1) * 126
     return np.where(valid, np.round(v), 0).astype(np.uint8)
 
 
 def colorize_depth(depth_m: np.ndarray, rng_m=None) -> np.ndarray:
-    """Turbo-like colormap; invalid (0) pixels black."""
     valid = depth_m > 0
     if not valid.any():
         return np.zeros(depth_m.shape + (3,), np.uint8)
@@ -75,7 +60,6 @@ def colorize_depth(depth_m: np.ndarray, rng_m=None) -> np.ndarray:
 
 
 def instance_overlay(rgb: np.ndarray, inst: np.ndarray, alpha: float = 0.55) -> np.ndarray:
-    """inst: (H,W) int, -1 = background."""
     out = rgb.astype(np.float32).copy()
     ids = np.unique(inst[inst >= 0])
     rng = np.random.default_rng(7)
@@ -87,7 +71,6 @@ def instance_overlay(rgb: np.ndarray, inst: np.ndarray, alpha: float = 0.55) -> 
 
 
 def _outline(mask: np.ndarray, width: int) -> np.ndarray:
-    """Boundary pixels of a mask, `width` px thick (outside the mask)."""
     grown = mask.copy()
     for _ in range(max(width, 1)):
         g = grown.copy()
@@ -113,7 +96,6 @@ def _arrow(draw, p0, p1, color, width):
 
 
 def draw_part_axes(img: Image.Image, K, parts, topmost: int | None, top_grasp_cam=None, scale: float = 1.0, dist=()):
-    """parts: list of dicts with R (3x3), t_mm (3,), axis_len_m, label, visib."""
     draw = ImageDraw.Draw(img)
     f = _font(max(int(12 * scale), 10))
     w = max(int(2 * scale), 1)
@@ -131,13 +113,12 @@ def draw_part_axes(img: Image.Image, K, parts, topmost: int | None, top_grasp_ca
         draw.text((uv[0][0] + 4, uv[0][1] + 2), str(p["label"]), fill=(255, 255, 255), font=f,
                   stroke_width=2, stroke_fill=(0, 0, 0))
     if topmost is not None and top_grasp_cam is not None:
-        T = top_grasp_cam                      # 4x4 grasp pose in camera frame (meters)
+        T = top_grasp_cam
         tcp, approach = T[:3, 3], T[:3, 2]
         start = tcp - approach * 0.12
         if start[2] > 0 and tcp[2] > 0:
             uv = project(K, np.vstack([start, tcp]), dist)
             _arrow(draw, uv[0], uv[1], (255, 225, 0), max(int(5 * scale), 3))
-            # crosshair at the grasp point (the arrow collapses to a dot for a top-down approach)
             r = max(9 * scale, 7)
             x, y = uv[1]
             draw.ellipse([x - r, y - r, x + r, y + r], outline=(255, 225, 0), width=w + 1)

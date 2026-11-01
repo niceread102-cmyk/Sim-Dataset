@@ -1,0 +1,38 @@
+# The pump cover PNP (assets/machine/pump_cover_pnp, kinematic: no physics, robot_sim.py moves its links as USD transforms; PhysX GPU crashed with this articulation): the CAD of the PNP of the layout split into frame, carriage and head (world frame of the map, two suction cups), the cycle of isaacsim/machine/pump_cover_pnp.py (two covers on the end jigs of conveyor 1 -> down, suck, up, over conveyor 2, down, release, conveyor 2 one step, back); a map places it in scene.machines without pose (the meshes are in the world frame).
+urdf: pump_cover_pnp/pump_cover_pnp.urdf
+
+kinematic: true
+speed: 1.0
+jaw_accel_m_s2: 1.0
+rotor_accel_rad_s2: 4.0
+
+vacuum:
+  topic: /pump_cover_pnp/vacuum
+  cups: [pnp_cup_1_link, pnp_cup_2_link]
+  radius_m: 0.05
+  #attach_on_release: {links: ["c2_jig_[0-9]+_link"], radius_m: 0.1}
+  attach_on_release: {links: ["c2_jig_[0-9]+_link"], radius_m: 0.15}
+
+cycle:
+  joints: {slide: pnp_slide, z: pnp_z, turn: pnp_turn}
+  #up_z: 0.2
+  up_z: 0.045
+  pick: {slide: 0.0, z: 0.0, turn: 0.0}
+  #place: {slide: -1.3552, z: 0.0, turn: 1.5708}
+  #place: {slide: -1.3547, z: 0.0, turn: 0.0}
+  #place: {slide: -1.2907, z: 0.0, turn: 0.0}
+  #place: {slide: -1.2999, z: 0.0008, turn: 0.0}
+  place: {slide: -1.0944, z: 0.0008, turn: 0.0}
+  tol: {slide: 0.005, z: 0.005, turn: 0.02}
+  settle_s: 0.3
+  source:
+    plates_topic: /pump_cover_conveyor_1/hand_plates
+    moving_topic: /pump_cover_conveyor_1/carriers/moving
+    mask: 3
+    stable_s: 1.0
+  target:
+    carriers_topic: /pump_cover_conveyor_2/carriers
+    moving_topic: /pump_cover_conveyor_2/carriers/moving
+    steps: 1
+    remove_topic: /pump_cover_conveyor_2/remove
+  timeouts_s: {move: 30.0, vacuum: 5.0, machine: 60.0, conveyor: 60.0}
