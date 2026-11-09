@@ -1,5 +1,6 @@
-# The conveyor (assets/machine/conveyopr): URDF, drives, chain of jigs, attach and the step cycle of isaacsim/machine/conveyor.py; the same in every map (a map places it in scene.machines).
-urdf: conveyopr/urdf/conveyor.urdf
+# The conveyor (assets/machine/side_plate_conveyor): URDF, drives, chain of jigs, attach and the step cycle of isaacsim/machine/conveyor.py; the same in every map (a map places it in scene.machines).
+#urdf: conveyopr/urdf/conveyor.urdf
+urdf: side_plate_conveyor/urdf/conveyor.urdf
 
 materials:
   - {links: ["base_link"], color: [0.62, 0.64, 0.67], metallic: 1.0, roughness: 0.40}
@@ -22,13 +23,16 @@ carriers:
   topic: /conveyor/carriers
 
 trigger_topic: /laser_marker/hands_done
+remove_topic: /conveyor/remove
 attach:
   enabled: true
-  trigger_topic: /laser_marker/hands_release
+  #trigger_topic: /laser_marker/hands_release
+  trigger_topic: /conveyor/remove
   delay_s: 0.3
   jig_links: ["jig_pair_.*"]
   jig_collision: false
-  remove_box_m: [[-0.70, 0.72], [-0.30, 0.23], [0.80, 1.20]]
+  #remove_box_m: [[-0.70, 0.72], [-0.30, 0.23], [0.80, 1.20]]
+  remove_box_m: [[0.54, 0.72], [-0.30, 0.23], [0.80, 1.20]]
   base_link: base_link
 
 cycle:

@@ -1,8 +1,9 @@
-# The laser marker (assets/machine/laser_marker): URDF, drives, seats, fixtures, belt, hands and the cycle of isaacsim/machine/laser_marker.py; the same in every map (a map places it in scene.machines).
+# The laser marker (assets/machine/laser_marker): URDF, drives, seats, fixtures, belt, hands, jaw grip holds (the plate follows the rotor while the jaws are stopped on it), part sensors and the cycle of isaacsim/machine/laser_marker.py (runs on its own from the sensors: turn_over plate -> flipper, standard plate -> ready for the robot, plate on the belt -> one pitch); the same in every map (a map places it in scene.machines).
 urdf: laser_marker/urdf/laser_marker_v2.urdf
 
 joint_pos:
-  right_flip_joint: 1.5708
+  #right_flip_joint: 1.5708
+  right_flip_joint: 3.14159
   left_flip_joint: 1.5708
   left_gripper_1_jaw_a_joint: 0.01
   left_gripper_1_jaw_b_joint: 0.01
@@ -12,10 +13,16 @@ joint_pos:
   right_gripper_jaw_b_joint: 0.01
 
 speed: 1.0
+solver_iterations: {position: 64, velocity: 16}
 joint_speeds:
+  #"right_.*": 9.0
+  #"left_.*": 9.0
+  "right_flip_joint": 3.0
+  "left_flip_joint": 3.0
   "right_.*": 9.0
   "left_.*": 9.0
-rotor_accel_rad_s2: 40.0
+#rotor_accel_rad_s2: 40.0
+rotor_accel_rad_s2: 12.0
 jaw_accel_m_s2: 1.5
 rotor_damping: 0.5
 
@@ -34,6 +41,7 @@ collision_decomposition:
   "seat_turn_over": {max_hulls: 64, voxel_resolution: 3000000, error_percentage: 1.0, min_thickness: 0.001, shrink_wrap: true}
   "seat_.*": {}
 collision_friction: {"carrier_.*": 0.15}
+#collision_friction_max: {"right_gripper_jaw_.*": 1.0, "left_gripper_.*": 1.0}
 fixtures:
   friction: 0.08
   friction_moving: 0.5
@@ -58,11 +66,26 @@ part_pose:
   radius_m: 0.08
   topic: /target_part_pose
 
+grip_holds:
+  - {jaws: [right_gripper_jaw_a_joint, right_gripper_jaw_b_joint], link: right_rotor, point_m: [0.0, 0.9103], z_m: [0.9, 1.2], radius_m: 0.03}
+  - {jaws: [left_gripper_1_jaw_a_joint, left_gripper_1_jaw_b_joint], link: left_rotor, point_m: [0.0, -0.83], z_m: [0.9, 1.2], radius_m: 0.03, attach_on_release: {links: ["jig_pair_[0-9]+"], radius_m: 0.3}}
+  - {jaws: [left_gripper_2_jaw_a_joint, left_gripper_2_jaw_b_joint], link: left_rotor, point_m: [0.0, -0.47], z_m: [0.9, 1.2], radius_m: 0.03, attach_on_release: {links: ["jig_pair_[0-9]+"], radius_m: 0.3}}
+
+sensors:
+  points_m:
+    standard: [0.0, 0.7103]
+    turn_over: [0.0, 0.9103]
+    belt: [0.0, 0.25]
+  radius_m: 0.03
+  z_m: [0.9, 1.2]
+  topic: /laser_marker/sensors
+
 cycle:
   flipper:
     rotor: right_flip_joint
     jaws: [right_gripper_jaw_a_joint, right_gripper_jaw_b_joint]
-    rest: 1.5708
+    #rest: 1.5708
+    rest: 3.14159
     grab: 3.14159
     release: 0.0
     close_mm: 7.0
@@ -83,9 +106,12 @@ cycle:
   jaw_tol: 0.0005
   release_tol: 0.005
   timeouts_s: {flip: 90.0, jaws: 30.0, belt: 120.0, machine: 60.0}
+  sensor_still_s: 1.0
   topics:
+    state: /laser_marker/state
+    robot_zone: /robot/zone
     ready: /laser_marker/ready
-    transfer_done: /transfer_done
+    #transfer_done: /transfer_done
     hands_done: /laser_marker/hands_done
     hands_release: /laser_marker/hands_release
-    sequence_done: /sequence_done
+    #sequence_done: /sequence_done

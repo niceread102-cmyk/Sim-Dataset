@@ -14,7 +14,7 @@ CONFIGS = os.path.join(ISAAC_DIR, "configs")
 MAPS_DIR = os.path.join(CONFIGS, "map")
 ROBOTS_DIR = os.path.join(CONFIGS, "robot")
 MACHINES_DIR = os.path.join(CONFIGS, "machine")
-SEQUENCE_DIR = os.path.join(CONFIGS, "sequence")
+SEQUENCE_DIR = os.path.join(SIM_DIR, "control", "sequence")
 OBJECTS_DIR = os.path.join(CONFIGS, "object")
 ASSETS = os.path.join(SIM_DIR, "assets")
 ROBOT_ASSETS = os.path.join(ASSETS, "robot")
@@ -179,6 +179,43 @@ def expand_crates(crate, crates):
                 home = [float(v) for v in c["home"]]
                 home[2] -= level * pitch
                 out.append({**c, "home": home, "floor_z": float(c.get("floor_z", crate.get("floor_z", 0.0))) - level * pitch, "level": level, "group": g})
+    return out
+
+
+def crates_from_map(scene, crate):
+    from binsim.pallets import DEFAULTS, _rz, crate_count, layout
+    pc = {**DEFAULTS, **(scene.get("pallets") or {})}
+    if not pc.get("items"):
+        raise ValueError("crate.from_map: the map has no pallets: the crates cannot come from it")
+    box = pc["crate"]
+    cx, cy, cz = (float(v) for v in box["size_m"])
+    gap, layers = float(box.get("gap_m", 0.01)), int(pc["layers"])
+    grids, mode = [tuple(int(v) for v in g) for g in pc["grids"]], str(pc["grid_mode"])
+    if len(grids) > 1 and mode != "alternate":
+        raise ValueError(f"crate.from_map: pallets.grids has {len(grids)} grids with grid_mode {mode!r}, the crate positions are random: use one grid or grid_mode: alternate")
+    scan = crate.get("scan") or {}
+    off, height, rpy = scan.get("offset_m", [0.0, 0.0]), float(scan.get("height_m", 0.4)), list(scan.get("rpy_deg", [180, 0, 45]))
+    order = [int(v) for v in crate.get("pallet_order") or range(len(pc["items"]))]
+    if sorted(order) != list(range(len(pc["items"]))):
+        raise ValueError(f"crate.pallet_order {order}: needs every pallet index 0..{len(pc['items']) - 1} of the map once")
+    out = []
+    for k in order:
+        item = pc["items"][k]
+        if not item.get("enabled", True):
+            continue
+        px, py, pz = (float(v) for v in item["pos_m"])
+        pyaw = math.radians(float(item.get("yaw_deg", 0.0)))
+        for level in range(layers):
+            layer = layers - 1 - level
+            grid = grids[layer % len(grids)] if mode == "alternate" else grids[0]
+            _, pts, _ = layout(grid, (cx, cy), gap)
+            floor_z = pz + layer * (cz + float(pc["layer_gap_m"])) + float(box["floor_z_m"])
+            for idx, (u, v) in enumerate(pts):
+                if crate_count(pc["parts_per_crate"], k, layer, idx, grid) <= 0:
+                    continue
+                dx, dy = _rz(pyaw)[:2, :2] @ [u, v]
+                x, y = px + float(dx), py + float(dy)
+                out.append({"centre": [x, y], "home": [x + float(off[0]), y + float(off[1]), floor_z + height, *rpy], "floor_z": floor_z, "level": level, "group": k})
     return out
 
 

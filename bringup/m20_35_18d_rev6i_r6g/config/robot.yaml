@@ -1,0 +1,25 @@
+# m20_35_18d_rev6i_r6g: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/m20_35_18d_rev6i_r6g.yaml (everything but its `sim:`); keep both in step.
+name: m20_35_18d_rev6i_r6g
+gripper: none
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {J2: 0.2618, J5: -1.3090}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {J6: [-360, 360]}
+control: {wrist_margin_deg: 1.0, wrist_margin_run_deg: 0.5, strict_forearm_turn_deg: 10.0, strict_forearm_turn_run_deg: 15.0, reach_forearm_turn_deg: 60.0, flip_forearm_deg: 90.0, flip_elbow_deg: 120.0, singularity_avoidance: true, wrist_offset_deg: 0.5, wrist_band_deg: 10.0, wrist_hold_tilt_deg: 0.5, wrist_turn_step_deg: 1.0}
+controller: /m20_35_18d_rev6i_r6g_traj_controller
+vacuum: {topic: /vacuum/command}
+wrist_camera:
+  link: phoxi_camera
+  output_dir: ~/project/gdrnpp_bin_6DOF_estimation/camera
+  resolution: [1236, 1032]
+  fx: 1412.0
+  fy: 1412.0
+  lens:
+    distortion: {k1: -0.3594}
+  depth_scale: 0.1
+  depth_range_m: [0.458, 1.118]
+  warmup_frames: 8
+slow_steps: [insert, lower]

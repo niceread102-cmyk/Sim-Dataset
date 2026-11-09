@@ -1,17 +1,18 @@
-# ur5e: Universal Robots UR5e in isaacsim/robot_sim.py and MoveIt (URDF, gripper, start pose in rad, drives, speeds, limits), the same in every map.
+# ur5e: Universal Robots UR5e: top level = URDF, gripper, start pose in rad, limits for MoveIt / ik_node.py / robot_sequence.py (the same on the real robot), `sim:` = drives, speeds and colliders of isaacsim/robot_sim.py only, the same in every map.
 # lab robot_sim.py robot:=ur5e   |   ros2 launch robot.launch.py robot:=ur5e
 name: ur5e
 gripper: none
 gripper_topic: /gripper/command
-gripper_material: null
 pos_m: [0.0, 0.0, 0.0]
 rpy_deg: [0, 0, 0]
 joint_pos: {shoulder_lift_joint: -1.5708, elbow_joint: 1.5708, wrist_1_joint: -1.5708, wrist_2_joint: -1.5708}
-stiffness: 1600
-damping: 80
-speed: 0.3
 velocity_scaling: 0.15
 acceleration_scaling: 0.05
 joint_limits_deg: {}
-physics_hz: 60
 controller: /ur5e_traj_controller
+sim:
+  gripper_material: null
+  stiffness: 1600
+  damping: 80
+  speed: 0.3
+  physics_hz: 60

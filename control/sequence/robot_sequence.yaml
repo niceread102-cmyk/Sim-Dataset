@@ -1,0 +1,33 @@
+# Defaults of control/robot_sequence.py for every map: approach distance, start-up retries, recovery, gripper values, topics (the robot control has its own settings).
+target: tcp
+
+poses:
+  home: ready
+  place: home
+  release: null
+  place_height: null
+  place_offset: null
+
+approach:
+  distance: 0.2
+
+startup:
+  poll: 1.0
+  retries: 3
+
+motion:
+  recover_home: true
+
+gripper:
+  topic: /gripper/command
+  open: 1.0
+  close: 0.0
+
+topics:
+  target_pose: /target_pose
+  place_variant: /place_variant
+  target_part_pose: /target_part_pose
+  machine_ready: /laser_marker/ready
+  transfer_done: /transfer_done
+  sequence_done: /sequence_done
+  part_turned_over: /part_turned_over

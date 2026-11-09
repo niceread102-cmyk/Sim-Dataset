@@ -1,0 +1,13 @@
+# lite6: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/lite6.yaml (everything but its `sim:`); keep both in step.
+name: lite6
+gripper: none
+gripper_joints: [finger_joint1]
+gripper_topic: /gripper/command
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {joint3: 1.5708, joint5: 1.5708}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+controller: /lite6_traj_controller

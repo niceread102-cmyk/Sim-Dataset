@@ -1,0 +1,11 @@
+# hdr50_22: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/hdr50_22.yaml (everything but its `sim:`); keep both in step.
+name: hdr50_22
+gripper: none
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {j2: 1.5708, j3: -0.2618, j5: -1.3090}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+controller: /hdr50_22_traj_controller

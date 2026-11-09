@@ -1,0 +1,11 @@
+# m710id_70: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/m710id_70.yaml (everything but its `sim:`); keep both in step.
+name: m710id_70
+gripper: none
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {J3: -0.2618, J5: -1.3090}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+controller: /m710id_70_traj_controller

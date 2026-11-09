@@ -22,3 +22,8 @@ grasps:
   suction_auto: {num: 48, seed: 0}
   suction: []
   parallel_jaw: []
+
+vision:
+  detector: runs/detector_pump/best.pt
+  pose: runs/pose_s00/best.pt
+  models: ~/IsaacSim/captures/bin_ds_pump_cover_3k/part_01/shard_00/models

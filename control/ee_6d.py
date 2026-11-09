@@ -1,13 +1,13 @@
 """ee_6d.py: type a target, it goes out on /target_pose (geometry_msgs/Pose: TCP in the world frame) to ik_node.py or robot_sequence.py.
 
-    python3 control/ee_6d.py [robot:=<name>] [map:=<map>] [id:=<ROS domain id>]
+    python3 control/ee_6d.py [robot:=<name>] [sequence:=<name>] [id:=<ROS domain id>]
 
 Input: x y z [roll pitch yaw | qx qy qz qw] [standard | turn over], or `lens x y z [yaw]` = the TCP that puts the wrist camera lens there.
-id:= sends to the robot of the map with that ROS domain id.
+id:= sends in that ROS domain (the ROS domain id of the launch). `lens` needs robot:= or sequence:= (the robot of the sequence).
 """
-import os
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import rclpy
@@ -17,21 +17,48 @@ from geometry_msgs.msg import Pose
 from std_msgs.msg import String
 from scipy.spatial.transform import Rotation
 
+import cell_config
+
 DEFAULT_RPY = (180.0, 0.0, 0.0)
-SIM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(SIM, 'isaacsim'))
-import sim_config
 
 
-def lens_calibration(robot=None, map_name=None, id=None):
-    import make_robot_config as mrc
-    robot, map_name = sim_config.with_current(robot, map_name)
-    if id is not None:
-        robot = sim_config.option(sys.argv[1:], 'robot')
-    robot = sim_config.robot_entry(sim_config.scene_of(map_name), robot, id)["name"]
-    ry = sim_config.load_robot(robot)
-    ik = yaml.safe_load(open(os.path.join(sim_config.BRINGUP_DIR, robot, 'config', 'ik_node.yaml')))
-    T = mrc.Urdf(mrc.find_urdf(robot)).relative_pose(ik['ee_link'], ry['wrist_camera']['link'])
+def fixed_pose(urdf, a, b):
+    parent = {j.find('child').get('link'): j for j in ET.parse(urdf).getroot().findall('joint')}
+
+    def up(n):
+        out = [n]
+        while n in parent:
+            n = parent[n].find('parent').get('link')
+            out.append(n)
+        return out
+
+    def frame(n, top):
+        T = np.eye(4)
+        while n != top:
+            j = parent[n]
+            if j.get('type') != 'fixed':
+                return None
+            o = j.find('origin')
+            step = np.eye(4)
+            if o is not None:
+                step[:3, :3] = Rotation.from_euler('xyz', [float(v) for v in (o.get('rpy') or '0 0 0').split()]).as_matrix()
+                step[:3, 3] = [float(v) for v in (o.get('xyz') or '0 0 0').split()]
+            T = step @ T
+            n = j.find('parent').get('link')
+        return T
+    pa, pb = up(a), up(b)
+    top = next((n for n in pa if n in pb), None)
+    Ta, Tb = (frame(a, top), frame(b, top)) if top is not None else (None, None)
+    return None if Ta is None or Tb is None else np.linalg.inv(Ta) @ Tb
+
+
+def lens_calibration(robot=None, sequence=None):
+    if not robot:
+        robot = cell_config.load_sequence_file(cell_config.sequence_of(sequence)).get('robot')
+    robot = cell_config.pick_robot(robot)
+    ry = cell_config.load_robot(robot)
+    ik = yaml.safe_load(open(cell_config.BRINGUP_DIR / robot / 'config' / 'ik_node.yaml'))
+    T = fixed_pose(cell_config.find_urdf(robot), ik['ee_link'], ry['wrist_camera']['link'])
     if T is None:
         raise RuntimeError(f"{ry['wrist_camera']['link']} is not held to {ik['ee_link']} by fixed joints in the URDF of {robot}")
     return T, np.array(ik['tcp_offset'], float)
@@ -102,12 +129,12 @@ def is_number(text):
 
 
 def main(args=None):
-    id = sim_config.option(sys.argv[1:], 'id')
+    id = cell_config.option(sys.argv[1:], 'id')
     rclpy.init(args=args, **({} if id is None else {'domain_id': int(id)}))
     if id is not None:
         print(f"ROS domain {int(id)}: the robot of the launch with id:={id}")
     node = TargetPublisher()
-    robot, map_name = sim_config.option(sys.argv[1:], 'robot'), sim_config.option(sys.argv[1:], 'map')
+    robot, sequence = cell_config.option(sys.argv[1:], 'robot'), cell_config.option(sys.argv[1:], 'sequence')
     cal = None
 
     try:
@@ -120,7 +147,7 @@ def main(args=None):
                 try:
                     x, y, z, *rest = map(float, user_input.split()[1:])
                     if cal is None:
-                        cal = lens_calibration(robot, map_name, id)
+                        cal = lens_calibration(robot, sequence)
                         print(f"lens calibration (flange -> lens): xyz {np.round(cal[0][:3, 3], 4).tolist()} m, TCP offset {cal[1].tolist()} m")
                     pos, r = lens_to_tcp(x, y, z, rest[0] if rest else 0.0, cal)
                 except (ValueError, RuntimeError, KeyError, TypeError) as e:

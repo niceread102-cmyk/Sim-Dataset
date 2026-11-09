@@ -1,0 +1,12 @@
+# ur5e: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/ur5e.yaml (everything but its `sim:`); keep both in step.
+name: ur5e
+gripper: none
+gripper_topic: /gripper/command
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {shoulder_lift_joint: -1.5708, elbow_joint: 1.5708, wrist_1_joint: -1.5708, wrist_2_joint: -1.5708}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+controller: /ur5e_traj_controller

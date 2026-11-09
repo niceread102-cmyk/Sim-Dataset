@@ -1,6 +1,9 @@
 """vision_pick.py: wrist camera picture -> 6D poses (gdrnpp) -> the best part (pick_filter.py) -> /target_pose for robot_sequence.py, crate by crate.
 
-    python3 control/vision_pick.py [--dry-run] [--loop] [--robot <name>] [--map <map>]
+    python3 control/vision_pick.py [model:=side_plate|pump_cover] [--dry-run] [--loop] [--robot <name>] [--map <map>]
+
+model:= (or --model) = the part of isaacsim/configs/object/<part>.yaml: its `vision:` gives the detector, the pose net (paths in the gdrnpp folder) and the CAD models folder;
+default = the part of the pallets of the map.
 """
 import argparse
 import itertools
@@ -27,16 +30,57 @@ from std_msgs.msg import Bool, Empty, Int32, String
 
 SIM_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SIM_DIR / 'isaacsim'))
+import compute_grasp_tcp_pose as grasp_tcp
 import sim_config
 from pick_filter import mask_outside, rank, roi_polygon
 GDRNPP = Path.home() / 'project' / 'gdrnpp_bin_6DOF_estimation'
-MODELS = Path.home() / 'IsaacSim' / 'captures' / 'side_plate_10k' / 'shard_00' / 'models'
 OUT_DIR = GDRNPP / 'runs' / 'vision_pick'
 EDGES = [(0, 1), (1, 3), (3, 2), (2, 0), (4, 5), (5, 7), (7, 6), (6, 4), (0, 4), (1, 5), (2, 6), (3, 7)]
 TOPIC_CAPTURE, TOPIC_TARGET = '/wrist_camera/capture', '/target_pose'
 TOPIC_PART, TOPIC_DONE, TOPIC_TRANSFER = '/part_turned_over', '/sequence_done', '/transfer_done'
 TOPIC_PICTURE = '/vision_pick/picture'
 TIMEOUT = {'capture': 180.0, 'pipeline': 1200.0, 'sequence': 1800.0, 'transfer': 1800.0}
+
+
+def vision_of(model=None, map_name=None, robot=None):
+    try:
+        robot, map_name = sim_config.with_current(robot, map_name)
+        scene = sim_config.scene_of(map_name)
+    except ValueError:
+        scene = {}
+    part = model or (scene.get('pallets') or {}).get('part') or 'side_plate'
+    path = Path(sim_config.OBJECTS_DIR) / f'{part}.yaml'
+    if not path.is_file():
+        raise SystemExit(f'model:={part}: {path} not found (parts: {", ".join(sorted(p.stem for p in Path(sim_config.OBJECTS_DIR).glob("*.yaml")))})')
+    vision = sim_config._load_yaml_tree(str(path)).get('vision')
+    if not vision or not all(vision.get(k) for k in ('detector', 'pose', 'models')):
+        raise SystemExit(f'{path}: no `vision:` with detector, pose and models (the trained models of this part)')
+    return part, vision
+
+
+def grip_axis(model=None, map_name=None):
+    part = model or (sim_config.scene_of(map_name).get('pallets') or {}).get('part') or 'side_plate'
+    cfg = sim_config._load_yaml_tree(str(Path(sim_config.OBJECTS_DIR) / f'{part}.yaml'))
+    origin = np.array(cfg.get('axis_origin_mm') or [0.0, 0.0, 0.0], float) / 1000.0
+    from binsim.transforms import rpy_to_mat
+    return rpy_to_mat(cfg.get('axis_rpy_deg') or [0.0, 0.0, 0.0]), origin
+
+
+def apply_axis(poses, T_world_cam, axis):
+    R_axis, origin = axis
+    for p in poses:
+        R_cam, t_cam = np.array(p['R']), np.array(p['t'])
+        p['grip_R'] = (R_cam @ R_axis).tolist()
+        p['grip_t'] = (t_cam + R_cam @ (origin * 1000.0)).tolist()
+        R = T_world_cam[:3, :3] @ np.array(p['grip_R'])
+        xyz = T_world_cam[:3, :3] @ (np.array(p['grip_t']) / 1000.0) + T_world_cam[:3, 3]
+        flipped = bool(R[2, 2] < 0)
+        tcp = grasp_tcp.R_to_rpy(R @ (grasp_tcp.FLIPPED_TCP_R if flipped else grasp_tcp.DEFAULT_TCP_R))
+        state = 'turn_over' if flipped else 'standard'
+        p['xyz_m'], p['rpy_deg'], p['state'] = xyz.tolist(), grasp_tcp.R_to_rpy(R).tolist(), state
+        p['world'] = ' '.join([f'{v:.3f}' for v in xyz] + [f'{a + 0.0:.1f}' for a in p['rpy_deg']])
+        p['ee_6d'] = ' '.join([f'{v:.3f}' for v in xyz] + [f'{a + 0.0:.1f}' for a in tcp]) + ' ' + state
+    return poses
 
 
 def camera_dir(robot=None, map_name=None):
@@ -52,6 +96,20 @@ def camera_dir(robot=None, map_name=None):
     return Path(os.path.expanduser(str(out)))
 
 
+def has_transfer(robot=None, map_name=None):
+    try:
+        robot, map_name = sim_config.with_current(robot, map_name)
+        scene = sim_config.scene_of(map_name)
+        name = sim_config.pick_robot(robot, scene)
+    except ValueError:
+        return True
+    path = Path(sim_config.SEQUENCE_DIR) / f"{scene.get('sequence')}.yaml"
+    if not scene.get('sequence') or not path.is_file():
+        return True
+    cfg = sim_config._load_yaml_tree(str(path))
+    return bool(((cfg.get('robots') or {}).get(name) or {}).get('transfer') or cfg.get('transfer'))
+
+
 def crate_of(robot=None, map_name=None):
     try:
         robot, map_name = sim_config.with_current(robot, map_name)
@@ -65,6 +123,8 @@ def crate_of(robot=None, map_name=None):
     cfg = sim_config._load_yaml_tree(str(path))
     mine = (cfg.get('robots') or {}).get(name) or {}
     crate = mine.get('crate') or cfg.get('crate')
+    if (crate or {}).get('from_map'):
+        return crate, sim_config.crates_from_map(scene, crate)
     crates = (mine.get('poses') or {}).get('crates') or (cfg.get('poses') or {}).get('crates') or mine.get('crates') or cfg.get('crates') or []
     return crate, sim_config.expand_crates(crate, crates)
 
@@ -131,10 +191,11 @@ def draw_ranking(rgb, poses, ranked, K, corners, title, top_n=5, blur=9.0):
         color, width = ((255, 0, 255), 5) if rank == 1 else ((0, 220, 255), 3)
         for a, b in EDGES:
             d.line([tuple(uv[a]), tuple(uv[b])], fill=color, width=width)
-        o = project(K, t[None])[0]
+        Rg, tg = np.array(p.get('grip_R', R)), np.array(p.get('grip_t', t))
+        o = project(K, tg[None])[0]
         if rank == 1:
             for ax, c in enumerate(((255, 60, 60), (60, 255, 60), (70, 140, 255))):
-                e = project(K, (t + R[:, ax] * 30.0)[None])[0]
+                e = project(K, (tg + Rg[:, ax] * 30.0)[None])[0]
                 d.line([tuple(o), tuple(e)], fill=c, width=4)
             d.ellipse([o[0] - 6, o[1] - 6, o[0] + 6, o[1] + 6], outline=(255, 255, 255), width=2)
         x, y = uv.min(0)[0], uv.max(0)[1]
@@ -155,8 +216,9 @@ def draw_ranking(rgb, poses, ranked, K, corners, title, top_n=5, blur=9.0):
 
 
 class VisionPick(Node):
-    def __init__(self, crate=None, crates=()):
+    def __init__(self, crate=None, crates=(), axis=None):
         super().__init__('vision_pick')
+        self.axis = axis or (np.eye(3), np.zeros(3))
         self.crates, self.idx = list(crates), 0
         self.crate = {**crate, 'centre': self.crates[0]['centre'], 'floor_z': self.crates[0]['floor_z']} if crate and self.crates else crate
         self.empty = False
@@ -167,6 +229,7 @@ class VisionPick(Node):
         self.target_pub = self.create_publisher(Pose, TOPIC_TARGET, 10)
         self.part_pub = self.create_publisher(Bool, TOPIC_PART, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.conveyor_pub = self.create_publisher(Int32, crate['conveyor_topic'], 10) if crate and crate.get('conveyor_topic') else None
         self.picture_pub = self.create_publisher(String, TOPIC_PICTURE, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(String, TOPIC_DONE, self.cb_done, 10)
         self.transfer_done = False
@@ -235,7 +298,7 @@ class VisionPick(Node):
         python = str(args.gdrnpp / '.venv' / 'bin' / 'python')
         steps = [
             [python, 'camera_convert_data.py', '--out', str(sub_cam), '--to-bop', str(work / 'bop'), '--keep-distortion', '--models', str(args.models)],
-            [python, 'infer.py', '--set', f'data.root={work / "bop"}', '--scenes', '000000', '--view-stride', '1', '--out', str(work / 'run')],
+            [python, 'infer.py', '--detector', str(args.detector), '--pose', str(args.pose), '--set', f'data.root={work / "bop"}', '--scenes', '000000', '--view-stride', '1', '--out', str(work / 'run')],
         ]
         for cmd in steps:
             self.get_logger().info(f'running {Path(cmd[1]).name} ...')
@@ -251,6 +314,24 @@ class VisionPick(Node):
     def activate(self):
         if self.active_pub is not None:
             self.active_pub.publish(String(data=json.dumps({'index': self.idx, 'centre': list(self.crate['centre']), 'floor_z': float(self.crate['floor_z'])})))
+
+    def first_crate(self):
+        if self.next_pub is None:
+            return True
+        self.wait_for(self.next_pub, 'the next crate topic')
+        if self.next_pub.get_subscription_count() == 0:
+            return True
+        self.crate_ready = None
+        self.next_pub.publish(Int32(data=0))
+        self.get_logger().info(f"crate 0 (centre {self.crates[0]['centre']}, layer {self.crates[0]['level']} from the top): the arm goes to its scan pose")
+        end = time.time() + TIMEOUT['sequence']
+        while self.crate_ready is None and time.time() < end:
+            self.spin_for(0.5)
+        if self.crate_ready != 0:
+            self.get_logger().error(f'the arm did not reach the scan pose of crate 0 ({"no answer" if self.crate_ready is None else "it failed"}): stopping')
+            return False
+        time.sleep(float(self.crate.get('settle_s', 1.0)))
+        return True
 
     def next_crate(self):
         if self.next_pub is None or self.idx + 1 >= len(self.crates):
@@ -295,6 +376,7 @@ class VisionPick(Node):
         self.get_logger().info(f'frame {frame} ' + ('(already there)' if args.frame else 'captured'))
         with tempfile.TemporaryDirectory(prefix='vision_pick_') as tmp:
             poses, overlay, K, raw, T_world_cam, dist, poly = self.estimate(cam, frame, args, Path(tmp))
+        apply_axis(poses, T_world_cam, self.axis)
         good = rank(poses, T_world_cam, K, dist, poly, self.crate)
         left = [p for p in good if all(math.hypot(p['xyz_m'][0] - x, p['xyz_m'][1] - y) > args.skip_radius for x, y in self.failed)]
         if len(left) < len(good):
@@ -341,7 +423,10 @@ def main():
     ap.add_argument('--map', help='map name = isaacsim/configs/map/<map>.yaml: its robot (scene.robot) when --robot is not given')
     ap.add_argument('--camera-dir', type=Path, help='folder of the captured frames (default: wrist_camera.output_dir of the robot yaml)')
     ap.add_argument('--gdrnpp', type=Path, default=GDRNPP, help='the gdrnpp_bin_6DOF_estimation folder (with its .venv)')
-    ap.add_argument('--models', type=Path, default=MODELS, help='CAD models folder given to camera_convert_data.py --to-bop')
+    ap.add_argument('--model', help='part whose trained models are used (model:=<part> does the same): isaacsim/configs/object/<part>.yaml `vision:` (default: the part of the pallets of the map)')
+    ap.add_argument('--detector', help='detector weights (default: vision.detector of the part), relative to the gdrnpp folder')
+    ap.add_argument('--pose', help='pose net weights (default: vision.pose of the part), relative to the gdrnpp folder')
+    ap.add_argument('--models', type=Path, help='CAD models folder given to camera_convert_data.py --to-bop (default: vision.models of the part)')
     ap.add_argument('--out', type=Path, default=OUT_DIR, help='folder for <frame>_pick.png (all parts with the score ranking, the best one marked) and <frame>_pose6d.json')
     ap.add_argument('--blur', type=float, default=0.0, help='pixels: blur the detected parts in the picture (e.g. 9: they are the product of a customer); 0 = not blurred (default)')
     ap.add_argument('--frame', help='use this frame of the camera folder (e.g. 000012) instead of capturing a new one, for looking at an earlier capture')
@@ -351,13 +436,27 @@ def main():
     ap.add_argument('--loop', action='store_true', help='after every pick wait for /sequence_done and then for /transfer_done (the plate was put on the conveyor and the arm is at home again) and capture again, until nothing confident is left')
     ap.add_argument('--no-transfer', action='store_true', help='--loop: do not wait for /transfer_done (a sequence without a transfer of the plate to the conveyor)')
     args, ros_args = ap.parse_known_args()
+    short = sim_config.option(ros_args, 'model')
+    ros_args = [a for a in ros_args if not a.startswith('model:=')]
+    args.model = args.model or short
+    part, vision = vision_of(args.model, args.map, args.robot)
+    args.detector = args.detector or vision['detector']
+    args.pose = args.pose or vision['pose']
+    args.models = args.models or Path(os.path.expanduser(str(vision['models'])))
+    for weights in (args.detector, args.pose):
+        if not (args.gdrnpp / weights).is_file():
+            raise SystemExit(f'model {part}: {args.gdrnpp / weights} not found')
+    print(f'[INFO] model {part}: detector {args.detector}, pose {args.pose}, CAD models {args.models}', flush=True)
     args.camera_dir = args.camera_dir or camera_dir(args.robot, args.map)
     crate, crates = crate_of(args.robot, args.map)
+    args.no_transfer = args.no_transfer or not has_transfer(args.robot, args.map)
     rclpy.init(args=ros_args)
-    node = VisionPick(crate, crates)
+    node = VisionPick(crate, crates, grip_axis(part, args.map))
     node.get_logger().info(f'crate (ROI): {node.crate}' + (f', {len(crates)} crates in turn' if crates else '') if crate else 'no `crate:` in the sequence yaml: the whole image is used')
     node.activate()
     try:
+        if crates and not args.frame and not node.first_crate():
+            sys.exit(1)
         fails = 0
         while True:
             if not node.pick_once(args):
@@ -372,7 +471,7 @@ def main():
             if node.done is None:
                 node.get_logger().error('the robot did not report /sequence_done: stopping')
                 break
-            if node.done == 'failed':
+            if node.done in ('failed', 'unreachable'):
                 node.failed.append(node.last_xy)
                 fails += 1
                 node.get_logger().warn(f'the pick failed ({fails}/{args.max_fails}): this part is left out, the next capture follows')
@@ -381,6 +480,9 @@ def main():
                     break
             else:
                 fails = 0
+                if node.conveyor_pub:
+                    node.conveyor_pub.publish(Int32(data=1))
+                    node.get_logger().info(f'placed: the conveyor moves one pitch ({node.crate["conveyor_topic"]})')
                 if not args.no_transfer:
                     node.done, node.transfer_done = None, False
                     node.get_logger().info('waiting for the transfer of the plate to the conveyor (/transfer_done): the next picture is taken when the arm is at home again')

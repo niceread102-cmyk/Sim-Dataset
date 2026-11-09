@@ -1,4 +1,4 @@
-# m20_35_18d_mhzl2_20d: FANUC M-20iD/35 + extension + MHZL2-20D gripper in isaacsim/robot_sim.py and MoveIt (URDF, gripper, start pose in rad, drives, speeds, limits), the same in every map.
+# m20_35_18d_mhzl2_20d: FANUC M-20iD/35 + extension + MHZL2-20D gripper: top level = URDF, gripper, start pose in rad, limits for MoveIt / ik_node.py / robot_sequence.py (the same on the real robot), `sim:` = drives, speeds and colliders of isaacsim/robot_sim.py only, the same in every map.
 # lab robot_sim.py robot:=m20_35_18d_mhzl2_20d   |   ros2 launch robot.launch.py robot:=m20_35_18d_mhzl2_20d
 name: m20_35_18d_mhzl2_20d
 gripper: none
@@ -6,30 +6,9 @@ gripper_joints: [mhzl2_left_joint]
 pos_m: [0.0, 0.0, 0.0]
 rpy_deg: [0, 0, 0]
 joint_pos: {J1: 2.8798, J2: 0.2618, J5: -1.3090}
-stiffness: 20000
-damping: 1000
-speed: 2.0
-gripper_speed: 0.9
-accel_s: 0.3
 velocity_scaling: 0.1
 acceleration_scaling: 0.1
 joint_limits_deg: {}
-arrive_tolerance_rad: 0.01
-arrive_settle_frames: 10
-gripper_grace_frames: 8
-gripper_window_frames: 8
-physics_hz: 120
-collision_type: Convex Decomposition
-collision_decomposition: {"mhzl2_.*_fingertip_link": {sdf: 256}}
-collision_friction: {"mhzl2_.*_fingertip_link": 1.0}
-collision_ccd: ["mhzl2_.*_jaw_link", "mhzl2_.*_fingertip_link"]
-grip_hold: {when: open, radius_m: 0.04, stroke_m: [0.001, 0.0085], release: command}
-materials:
-  - {links: ["mhzl2_base_link"], color: [0.74, 0.76, 0.79], metallic: 1.0, roughness: 0.30}
-  - {links: ["mhzl2_.*_jaw_link"], color: [0.42, 0.44, 0.47], metallic: 1.0, roughness: 0.22}
-  - {links: ["mhzl2_.*_fingertip_link"], color: [0.80, 0.81, 0.83], metallic: 1.0, roughness: 0.16}
-  - {links: ["m20_extension_link"], color: [0.66, 0.68, 0.71], metallic: 1.0, roughness: 0.30}
-  - {links: ["phoxi_scanner"], metallic: 1.0, roughness: 0.35}
 wrist_camera:
   link: phoxi_camera
   output_dir: ~/project/gdrnpp_bin_6DOF_estimation/camera
@@ -42,3 +21,25 @@ wrist_camera:
   depth_range_m: [0.458, 1.118]
   warmup_frames: 8
 controller: /m20_35_18d_mhzl2_20d_traj_controller
+sim:
+  stiffness: 20000
+  damping: 1000
+  speed: 2.0
+  gripper_speed: 0.9
+  accel_s: 0.3
+  arrive_tolerance_rad: 0.01
+  arrive_settle_frames: 10
+  gripper_grace_frames: 8
+  gripper_window_frames: 8
+  physics_hz: 120
+  collision_type: Convex Decomposition
+  collision_decomposition: {"mhzl2_.*_fingertip_link": {sdf: 256}}
+  collision_friction: {"mhzl2_.*_fingertip_link": 1.0}
+  collision_ccd: ["mhzl2_.*_jaw_link", "mhzl2_.*_fingertip_link"]
+  grip_hold: {when: open, radius_m: 0.04, stroke_m: [0.001, 0.0085], release: command}
+  materials:
+    - {links: ["mhzl2_base_link"], color: [0.74, 0.76, 0.79], metallic: 1.0, roughness: 0.30}
+    - {links: ["mhzl2_.*_jaw_link"], color: [0.42, 0.44, 0.47], metallic: 1.0, roughness: 0.22}
+    - {links: ["mhzl2_.*_fingertip_link"], color: [0.80, 0.81, 0.83], metallic: 1.0, roughness: 0.16}
+    - {links: ["m20_extension_link"], color: [0.66, 0.68, 0.71], metallic: 1.0, roughness: 0.30}
+    - {links: ["phoxi_scanner"], metallic: 1.0, roughness: 0.35}

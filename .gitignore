@@ -8,3 +8,4 @@ control/robot_sequence_test.py
 *.stl
 assets/map/PUMP_COVER_MAP.usd
 assets/map/SIDE_PLATE_MAP_layout.usd
+isaacsim/video/

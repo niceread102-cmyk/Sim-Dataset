@@ -1,4 +1,4 @@
-"""conveyor.py: steps the conveyor chain of the map, one pitch per trigger_topic (the conveyor: /laser_marker/hands_done; robot_sim.py moves it on carriers.topic).
+"""conveyor.py: steps the conveyor chain of the map, one pitch per trigger_topic (the conveyor: /laser_marker/hands_done; robot_sim.py moves it on carriers.topic) and, if remove_topic is set, tells robot_sim.py after each step to remove the parts that came round to the last jig.
 
     python3 isaacsim/machine/conveyor.py [--machine <name>] [--now [N]]        (robot.launch.py with a sequence starts the one of the machine named conveyor; settings: configs/machine/<name>.yaml)
 """
@@ -22,6 +22,7 @@ CFG = sim_config.load_machine(NAME)
 try:
     TOPIC_TRIGGER = str(CFG['trigger_topic'])
     TOPIC_CARRIERS = str(CFG['carriers']['topic'])
+    TOPIC_REMOVE = str(CFG['remove_topic']) if CFG.get('remove_topic') else None
     TIMEOUT = {k: float(v) for k, v in CFG['cycle']['timeouts_s'].items()}
 except (KeyError, TypeError) as e:
     raise SystemExit(f"{sim_config.machine_file(NAME)}: missing {e} (trigger_topic, carriers.topic, cycle.timeouts_s)") from None
@@ -38,6 +39,7 @@ class Conveyor(Node):
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(Empty, TOPIC_TRIGGER, self.cb_trigger, 10)
         self.pub = self.create_publisher(Int32, TOPIC_CARRIERS, 10)
+        self.remove_pub = self.create_publisher(Empty, TOPIC_REMOVE, 10) if TOPIC_REMOVE else None
 
     def cb_moving(self, msg):
         self.moving = bool(msg.data)
@@ -84,6 +86,8 @@ class Conveyor(Node):
                     self.pending -= 1
                 self.step()
                 log.info('conveyor: one step done')
+                if self.remove_pub is not None:
+                    self.remove_pub.publish(Empty())
         except TimeoutError as e:
             with self.lock:
                 self.pending = 0

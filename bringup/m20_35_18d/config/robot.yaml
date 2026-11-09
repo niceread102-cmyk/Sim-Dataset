@@ -1,0 +1,23 @@
+# m20_35_18d: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/m20_35_18d.yaml (everything but its `sim:`); keep both in step.
+name: m20_35_18d
+gripper: jegg2510n_original_fingers
+gripper_topic: /gripper/command
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+wrist_camera:
+  link: phoxi_camera
+  output_dir: ~/project/gdrnpp_bin_6DOF_estimation/camera
+  resolution: [1236, 1032]
+  fx: 1412.0
+  fy: 1412.0
+  lens:
+    distortion: {k1: -0.3594}
+  depth_scale: 0.1
+  depth_range_m: [0.458, 1.118]
+  warmup_frames: 8
+controller: /m20_35_18d_traj_controller

@@ -1,0 +1,12 @@
+# r2000ic_165f: the robot for the control part (control/ + bringup/): gripper, base offset, start pose, limits, vacuum, slow steps; read by ik_node.py, robot_sequence.py and robot.launch.py.
+# Copy of the real-robot part of isaacsim/configs/robot/r2000ic_165f.yaml (everything but its `sim:`); keep both in step.
+name: r2000ic_165f
+gripper: none
+gripper_topic: /gripper/command
+pos_m: [0.0, 0.0, 0.0]
+rpy_deg: [0, 0, 0]
+joint_pos: {}
+velocity_scaling: 0.15
+acceleration_scaling: 0.05
+joint_limits_deg: {}
+controller: /r2000ic_165f_traj_controller

@@ -1,18 +1,17 @@
-"""robot.launch.py: one launch for any robot in any map: robot_state_publisher + move_group + RViz + control/ik_node.py,
-and with a sequence also control/robot_sequence.py and the cycles of the machines of the map (isaacsim/machine/<name>.py).
+"""robot.launch.py: one launch for any robot: robot_state_publisher + move_group + RViz + control/ik_node.py, and with a sequence also control/robot_sequence.py.
 
-    ros2 launch robot.launch.py [robot:=<name>] [map:=<map>] [sequence:=<name>|true] [id:=<domain>] [ik_node:=false] [machines:=false] [rviz:=false]
+    ros2 launch robot.launch.py [robot:=<name>] [sequence:=<name>] [pose:="x y z roll pitch yaw"] [id:=<domain>] [ik_node:=false] [rviz:=false] [joints:=false]
 
-The robot stands where the map puts it (scene.robot_pose); everything robot specific is in bringup/<robot>/config and isaacsim/configs/robot/<robot>.yaml.
+Needs nothing of the simulation: it only talks to it (or to the real robot) over the topics.
+A small window shows the current angles of the arm joints in degrees; joints:=false does not open it.
+The robot stands where the sequence says (robot_pose of control/sequence/<name>.yaml) or where pose:= says; everything robot specific is in bringup/<robot>/config.
 """
 import math
-import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
-import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, LogInfo, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
@@ -22,17 +21,43 @@ from scipy.spatial.transform import Rotation
 
 BRINGUP_DIR = Path(__file__).resolve().parents[2]
 SIM_DIR = BRINGUP_DIR.parent
-sys.path.insert(0, str(SIM_DIR / "isaacsim"))
-import sim_config
+sys.path.insert(0, str(SIM_DIR / "control"))
+import cell_config
 
 IK_NODE = SIM_DIR / "control" / "ik_node.py"
 SEQUENCE_NODE = SIM_DIR / "control" / "robot_sequence.py"
-SEQUENCE_DIR = Path(sim_config.SEQUENCE_DIR)
+SEQUENCE_DIR = cell_config.SEQUENCE_DIR
+JOINT_WINDOW = """
+import math, sys, threading, tkinter, rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+names = sys.argv[1:]
+rclpy.init()
+node = Node('joint_window')
+latest = {}
+node.create_subscription(JointState, '/joint_states', lambda m: latest.update(zip(m.name, m.position)), 10)
+threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
+root = tkinter.Tk()
+root.title('Joints (deg)')
+root.attributes('-topmost', True)
+labels = {}
+for row, n in enumerate(names):
+    tkinter.Label(root, text=n, font=('monospace', 18, 'bold'), width=4).grid(row=row, column=0, padx=10, pady=4)
+    labels[n] = tkinter.Label(root, text='--', font=('monospace', 18), width=9, anchor='e')
+    labels[n].grid(row=row, column=1, padx=10)
+def tick():
+    for n in names:
+        if n in latest:
+            labels[n].config(text=f'{math.degrees(latest[n]):8.1f}')
+    root.after(100, tick)
+tick()
+root.mainloop()
+"""
 
 
-def robot_name(choice, scene):
+def robot_name(choice):
     robots = sorted(d.name for d in BRINGUP_DIR.iterdir() if (d / "config").is_dir())
-    name = sim_config.pick_robot(choice, scene)
+    name = cell_config.pick_robot(choice)
     if name not in robots:
         raise ValueError(f"no bringup/{name}/config; robots: {robots}")
     return name
@@ -59,7 +84,7 @@ def place_in_world(root, pos, rpy_deg):
 def load_urdf(urdf_file, pose=None):
     root = ET.parse(urdf_file).getroot()
     for mesh in root.iter("mesh"):
-        found = sim_config.find_mesh(mesh.get("filename"), str(urdf_file.parent))
+        found = cell_config.find_mesh(mesh.get("filename"), str(urdf_file.parent))
         if found:
             mesh.set("filename", "file://" + str(Path(found).resolve()))
     if pose is not None and (np.any(pose[0]) or np.any(pose[1])) and not place_in_world(root, *pose):
@@ -70,30 +95,34 @@ def load_urdf(urdf_file, pose=None):
 
 def planning_limits(config_dir, robot_cfg):
     limits = load_yaml(config_dir / "joint_limits.yaml")
-    for joint, (lo, hi) in (sim_config.robot_motion(robot_cfg)["joint_limits_deg"] or {}).items():
+    for joint, (lo, hi) in (cell_config.robot_motion(robot_cfg)["joint_limits_deg"] or {}).items():
         entry = limits.setdefault("joint_limits", {}).setdefault(joint, {})
         entry.update(has_position_limits=True, min_position=math.radians(float(lo)), max_position=math.radians(float(hi)))
     return limits
 
 
 def launch_setup(context, *args, **kwargs):
-    given = LaunchConfiguration("map").perform(context).strip()
     user_robot = LaunchConfiguration("robot").perform(context).strip() or None
     id = LaunchConfiguration("id").perform(context).strip() or None
-    robot_arg, map_name = sim_config.with_current(user_robot, given or None)
-    if id is not None and user_robot is None:
-        robot_arg = None
-    map_name = map_name or ""
-    scene = sim_config.scene_of(map_name)
-    entry = sim_config.robot_entry(scene, robot_arg, id)
-    robot = robot_name(entry["name"], scene)
-    id = id if id is not None else entry.get("id")
-    robot_cfg = sim_config.load_robot(robot)
+    seq = LaunchConfiguration("sequence").perform(context).strip()
+    seq = "" if seq.lower() in ("", "false", "none") else seq
+    if seq:
+        names = cell_config.sequence_names()
+        if seq not in names:
+            raise ValueError(f"sequence:={seq}: {SEQUENCE_DIR / (seq + '.yaml')} not found; sequences: {', '.join(names) or '-'}")
+        declared = cell_config.load_sequence_file(seq).get("robot")
+        if declared and user_robot and declared != cell_config.canonical_robot(user_robot):
+            raise ValueError(f"sequence:={seq} is the sequence of the robot {declared}, but robot:={user_robot}")
+        user_robot = user_robot or declared
+    robot = robot_name(user_robot)
+    robot_cfg = cell_config.load_robot(robot)
     config_dir = BRINGUP_DIR / robot / "config"
     rviz_file = BRINGUP_DIR / robot / "rviz" / "demo.rviz"
-    urdf_file = Path(sim_config.find_urdf(robot))
+    urdf_file = Path(cell_config.find_urdf(robot))
 
-    pose = tuple(np.array(v, float) for v in sim_config.robot_pose(robot_cfg, {**scene, "robot_pose": entry["pose"]}))
+    given_pose = LaunchConfiguration("pose").perform(context).split()
+    base = [float(v) for v in given_pose] if given_pose else (cell_config.sequence_value(seq, robot, "robot_pose") if seq else None)
+    pose = tuple(np.array(v, float) for v in cell_config.base_pose(robot_cfg, base))
     robot_description = {"robot_description": load_urdf(urdf_file, pose)}
     robot_description_semantic = {"robot_description_semantic": load_xacro(config_dir / f"{robot}.srdf")}
     robot_description_kinematics = {"robot_description_kinematics": load_yaml(config_dir / "kinematics.yaml")}
@@ -155,56 +184,40 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
-    seq = LaunchConfiguration("sequence").perform(context).strip()
-    seq = "" if seq.lower() in ("", "false", "none") else str(scene.get("sequence") or robot) if seq.lower() == "true" else seq
-    if seq:
-        names = sorted(f.stem for f in SEQUENCE_DIR.glob("*.yaml") if f.name != "robot_sequence.yaml")
-        if seq not in names:
-            raise ValueError(f"sequence:={seq}: {SEQUENCE_DIR / (seq + '.yaml')} not found; sequences: {', '.join(names) or '-'}")
-        declared = (yaml.safe_load(open(SEQUENCE_DIR / f"{seq}.yaml")) or {}).get("robot")
-        if declared and declared != robot:
-            raise ValueError(f"sequence:={seq} is the sequence of the robot {declared}, but robot:={robot}")
     use_sequence = bool(seq)
     use_ik_node = LaunchConfiguration("ik_node").perform(context).lower() == "true"
-    robot_yaml = sim_config.robot_config_path(robot)
     controllers = []
     if use_ik_node:
-        controllers.append(ExecuteProcess(cmd=[sys.executable, str(IK_NODE), "--config", str(config_dir / "ik_node.yaml"), "--robot", robot_yaml] + (["--no-target-pose"] if use_sequence else []),
-                                          name="ik_node", output="screen"))
-    machines = []
+        controllers.append(ExecuteProcess(cmd=[sys.executable, str(IK_NODE), "--robot-config", str(config_dir / "robot.yaml")], name="ik_node", output="screen"))
+    if LaunchConfiguration("joints").perform(context).lower() != "false":
+        arm_joints = [str(j) for j in (load_yaml(config_dir / "ik_node.yaml") or {}).get("arm_joints") or []]
+        if arm_joints:
+            controllers.append(ExecuteProcess(cmd=["/usr/bin/python3", "-c", JOINT_WINDOW, *arm_joints], name="joint_window", output="screen"))
     if use_sequence:
-        controllers.append(ExecuteProcess(cmd=[sys.executable, str(SEQUENCE_NODE), "--robot", robot, "--sequence", seq] + (["--map", map_name] if map_name else []),
+        controllers.append(ExecuteProcess(cmd=[sys.executable, str(SEQUENCE_NODE), "--robot", robot, "--sequence", seq],
                                           name="robot_sequence", output="screen"))
-        if LaunchConfiguration("machines").perform(context).lower() != "false":
-            for m in scene.get("machines") or []:
-                script = os.path.join(sim_config.MACHINE_SCRIPTS, f"{m['name']}.py")
-                if os.path.isfile(script):
-                    machines.append(m["name"])
-                    controllers.append(ExecuteProcess(cmd=[sys.executable, script], name=m["name"], output="screen"))
 
     show_rviz = LaunchConfiguration("rviz").perform(context).lower() == "true"
     domain = [SetEnvironmentVariable("ROS_DOMAIN_ID", str(int(id)))] if id is not None else []
     return [GroupAction([*domain, LogInfo(msg=f"robot {robot}{f' (ROS domain {int(id)})' if id is not None else ''}: {urdf_file.relative_to(SIM_DIR)} + bringup/{robot}/config, "
-                                     f"{'map ' + map_name if map_name else 'no map'}{'' if given else ' (of the running robot_sim.py)'}: base in the world at {pose[0].tolist()} m, rpy {pose[1].tolist()} deg"
-                                     + (f", sequence {seq}" if seq else "") + (f", machine cycles {machines}" if machines else "")),
+                                     f"base in the world at {pose[0].tolist()} m, rpy {pose[1].tolist()} deg"
+                                     + (f", sequence {seq}" if seq else "")),
                          robot_state_publisher, move_group, *([rviz] if show_rviz else []), *controllers])]
 
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("robot", default_value="",
-                              description="Robot name = its folder bringup/<name>/ and assets/robot/<name>/; empty = scene.robot of the map"),
+                              description="Robot name = its folder bringup/<name>/ and assets/robot/<name>/; empty = the robot of the sequence"),
         DeclareLaunchArgument("id", default_value="",
-                              description="ROS domain id of the robot (scene.robots of the map: {name, id, pose}): picks that robot and runs every node of this launch in its domain"),
-        DeclareLaunchArgument("map", default_value="",
-                              description="Map name = isaacsim/configs/map/<map>.yaml (its robot, where the robot stands, its sequence and machines); empty = no map"),
+                              description="ROS domain id: every node of this launch runs in that domain"),
+        DeclareLaunchArgument("pose", default_value="",
+                              description="Where the robot base stands in the world: \"x y z roll pitch yaw\" (m, deg); empty = robot_pose of the sequence, else 0"),
         DeclareLaunchArgument("ik_node", default_value="true",
                               description="Also run ik_node.py, which receives the ee target (/target_pose) and moves"),
         DeclareLaunchArgument("sequence", default_value="",
-                              description="Name of a sequence (isaacsim/configs/sequence/<name>.yaml): also run control/robot_sequence.py with it (ik_node then only follows its steps); "
-                                          "true = scene.sequence of the map. Empty = only ik_node"),
-        DeclareLaunchArgument("machines", default_value="true",
-                              description="With a sequence: also run the cycle of every machine of the map that has one (isaacsim/machine/<name>.py: the laser marker, the conveyor). false = none"),
+                              description="Name of a sequence (control/sequence/<name>.yaml): also run control/robot_sequence.py with it (ik_node then only follows its steps). Empty = only ik_node"),
         DeclareLaunchArgument("rviz", default_value="true", description="Start RViz"),
+        DeclareLaunchArgument("joints", default_value="true", description="Open a small window with the joint angles of the arm (deg); false = do not"),
         OpaqueFunction(function=launch_setup),
     ])

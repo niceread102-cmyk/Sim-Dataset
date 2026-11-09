@@ -18,6 +18,12 @@ DEFAULTS = {
     "tilt_deg": None,
     "parallel": False,
     "allow_flipped": True,
+    "arrange": None,
+    "arrange_gap_m": 0.02,
+    "arrange_tier_gap_m": 0.001,
+    "arrange_yaw_deg": 0.0,
+    "arrange_yaw_jitter_deg": 25.0,
+    "arrange_xy_jitter_m": 0.02,
 }
 
 
@@ -119,6 +125,74 @@ def fill_crate(rng, n: int, foot, height: float, inner, floor_z: float, max_top:
     return out
 
 
+def fill_crate_grid(rng, n: int, foot, height: float, inner, floor_z: float, max_top: float, gap: float, tier_gap: float, yaw: float, yaw_jitter: float, xy_jitter: float, tries: int = 200):
+    c, s = abs(math.cos(yaw)), abs(math.sin(yaw))
+    fx, fy = c * foot[0] + s * foot[1], s * foot[0] + c * foot[1]
+    cols = int((2.0 * inner[0] + gap) // (fx + gap))
+    rows = int((2.0 * inner[1] + gap) // (fy + gap))
+    if cols < 1 or rows < 1:
+        raise ValueError(f"pallets.arrange: a part of {foot[0]:.3f} x {foot[1]:.3f} m does not fit the crate floor {2 * inner[0]:.3f} x {2 * inner[1]:.3f} m")
+    tiers = int((max_top - floor_z + tier_gap) // (height + tier_gap))
+    if n > cols * rows * tiers:
+        print(f"[WARN] pallets.arrange: {n} parts do not fit one crate ({cols} x {rows} per tier, {tiers} tiers): only {cols * rows * tiers} are placed", flush=True)
+        n = cols * rows * tiers
+    hx, hy = foot[0] / 2 + 0.002, foot[1] / 2 + 0.002
+    out, placed = [], []
+    for i in range(n):
+        tier, slot = divmod(i, cols * rows)
+        if slot == 0:
+            placed = []
+        row, col = divmod(slot, cols)
+        cx = (col - (cols - 1) / 2) * (fx + gap)
+        cy = (row - (rows - 1) / 2) * (fy + gap)
+        pose = (cx, cy, yaw)
+        for _ in range(tries):
+            a = yaw + math.radians(float(rng.uniform(-yaw_jitter, yaw_jitter)))
+            xy = np.array([cx, cy]) + rng.uniform(-xy_jitter, xy_jitter, 2)
+            q = _quad(xy, a, hx, hy)
+            if np.abs(q[:, 0]).max() > inner[0] or np.abs(q[:, 1]).max() > inner[1] or any(_overlap(q, pq) for pq in placed):
+                continue
+            pose = (float(xy[0]), float(xy[1]), a)
+            break
+        placed.append(_quad(pose[:2], pose[2], hx, hy))
+        out.append((pose[0], pose[1], floor_z + tier * (height + tier_gap) + 0.5 * height, pose[2], False, 0.0, 0.0))
+    return out
+
+
+def fill_crate_scatter(rng, n: int, foot, height: float, inner, floor_z: float, max_top: float, gap: float, restarts: int = 800, tries: int = 40):
+    hx, hy = foot[0] / 2 + gap / 2, foot[1] / 2 + gap / 2
+    flat = min(n, max(1, int(0.5 * (4 * inner[0] * inner[1]) // (foot[0] * foot[1]))))
+    best = []
+    while flat >= 1 and not best:
+        for _ in range(restarts):
+            placed, out = [], []
+            for _ in range(flat):
+                for _ in range(tries):
+                    xy = rng.uniform([-inner[0], -inner[1]], [inner[0], inner[1]])
+                    yaw = float(rng.uniform(0.0, 2.0 * math.pi))
+                    q = _quad(xy, yaw, hx, hy)
+                    if np.abs(q[:, 0]).max() > inner[0] or np.abs(q[:, 1]).max() > inner[1] or any(_overlap(q, pq) for pq in placed):
+                        continue
+                    placed.append(q)
+                    out.append((float(xy[0]), float(xy[1]), yaw))
+                    break
+                else:
+                    break
+            if len(out) == flat:
+                best = out
+                break
+        if not best:
+            flat -= 1
+    result = [(x, y, floor_z + 0.5 * height, yaw, False, 0.0, 0.0) for x, y, yaw in best]
+    for k in range(n - len(best)):
+        x, y, _ = best[int(rng.integers(len(best)))]
+        tier = 1 + k // max(1, len(best))
+        if floor_z + (tier + 1) * height > max_top:
+            break
+        result.append((x, y, floor_z + (tier + 0.5) * height + 0.002 * tier, float(rng.uniform(0.0, 2.0 * math.pi)), False, 0.0, 0.0))
+    return result
+
+
 def layout(grid, crate_xy, gap: float):
     nx, ny = grid
     ex, ey = crate_xy
@@ -191,7 +265,14 @@ def plan_pallets(cfg: dict, part_ext, part_layer_rpy_deg, rng, part_centre=(0.0,
                 Rc = _rz(pyaw + cyaw)
                 pos = np.array([px, py, z0]) + _rz(pyaw) @ np.array([u, v, 0.0])
                 crates.append({"pallet": k, "layer": layer, "idx": idx, "pos": pos, "R": Rc, "grid": grids[k][layer], "dynamic": dynamic})
-                for j, (x, y, z, yaw, flip, th, az) in enumerate(fill_crate(rng, crate_count(cfg["parts_per_crate"], k, layer, idx, grids[k][layer]), foot, height, inner, floor_z, cz - 0.01, tilt=tilt or None, allow_flipped=bool(cfg["allow_flipped"]))):
+                count = crate_count(cfg["parts_per_crate"], k, layer, idx, grids[k][layer])
+                if cfg["arrange"] == "scatter":
+                    placed = fill_crate_scatter(rng, count, foot, height, inner, floor_z, cz - 0.01, float(cfg["arrange_gap_m"]))
+                elif cfg["arrange"] == "grid":
+                    placed = fill_crate_grid(rng, count, foot, height, inner, floor_z, cz - 0.01, float(cfg["arrange_gap_m"]), float(cfg["arrange_tier_gap_m"]), math.radians(float(cfg["arrange_yaw_deg"])), float(cfg["arrange_yaw_jitter_deg"]), float(cfg["arrange_xy_jitter_m"]))
+                else:
+                    placed = fill_crate(rng, count, foot, height, inner, floor_z, cz - 0.01, tilt=tilt or None, allow_flipped=bool(cfg["allow_flipped"]))
+                for j, (x, y, z, yaw, flip, th, az) in enumerate(placed):
                     Rp = Rc @ _rz(yaw) @ _tilt(az, th) @ (_rx(math.pi) if flip else np.eye(3)) @ Rb
                     parts.append({"pallet": k, "layer": layer, "crate": idx, "j": j, "pos": pos + Rc @ np.array([x, y, z]) - Rp @ np.asarray(part_centre, float), "R": Rp, "dynamic": dynamic})
     return {"crates": crates, "parts": parts, "grids": grids}

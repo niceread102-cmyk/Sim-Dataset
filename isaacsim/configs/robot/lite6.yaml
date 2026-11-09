@@ -1,18 +1,19 @@
-# lite6: UFactory Lite 6 with its own gripper (gripper_joints of lite6.urdf) in isaacsim/robot_sim.py and MoveIt (URDF, gripper, start pose in rad, drives, speeds, limits), the same in every map.
+# lite6: UFactory Lite 6 with its own gripper (gripper_joints of lite6.urdf): top level = URDF, gripper, start pose in rad, limits for MoveIt / ik_node.py / robot_sequence.py (the same on the real robot), `sim:` = drives, speeds and colliders of isaacsim/robot_sim.py only, the same in every map.
 # lab robot_sim.py robot:=lite6   |   ros2 launch robot.launch.py robot:=lite6
 name: lite6
 gripper: none
 gripper_joints: [finger_joint1]
 gripper_topic: /gripper/command
-gripper_material: null
 pos_m: [0.0, 0.0, 0.0]
 rpy_deg: [0, 0, 0]
 joint_pos: {joint3: 1.5708, joint5: 1.5708}
-stiffness: 1600
-damping: 80
-speed: 0.3
 velocity_scaling: 0.15
 acceleration_scaling: 0.05
 joint_limits_deg: {}
-physics_hz: 60
 controller: /lite6_traj_controller
+sim:
+  gripper_material: null
+  stiffness: 1600
+  damping: 80
+  speed: 0.3
+  physics_hz: 60

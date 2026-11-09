@@ -1,7 +1,7 @@
 # Map of the pump cover cell: the M20 with the vacuum gripper on its stand, two pallets of crates with pump covers, the two pump cover conveyors (robot pose, map USD, pallets, machines).
 # lab robot_sim.py map:=PUMP_COVER_MAP   |   ros2 launch robot.launch.py map:=PUMP_COVER_MAP [sequence:=true]
 scene:
-  robot: m20_35_18d_vacuum
+  robot: m20_35_18d_rev6i_r6g
   robot_pose: [0.33, -0.0083, 1.1, 0, 0, 180]
   sequence: pump_cover
   map: PUMP_COVER_MAP
@@ -142,7 +142,7 @@ scene:
       - {pos_m: [1.0646, 0.8004, 0.12], yaw_deg: 45, enabled: true}
       
         # pallet 1
-      - {pos_m: [1.0646, -0.8331, 0.12], yaw_deg: 45, enabled: false}
+      - {pos_m: [1.0646, -0.8331, 0.12], yaw_deg: 45, enabled: true}
 
     crate:
       usd: ../../../assets/object/usd/SIDE_PLATE_BOX_520x365x200mm.usd
@@ -153,34 +153,39 @@ scene:
       sdf_resolution: 256
       gap_m: 0.002
     part: pump_cover
-    layers: 6
+    layers: 2
     grids: [[2, 3]]
     grid_mode: pallet
-    dynamic_layers: 6
-    sdf_layers: 6
+    dynamic_layers: 2
+    sdf_layers: 2
     sdf_resolution: 256
     layer_gap_m: -0.010
     settle_s: 6.0
     parallel: true
+    arrange: scatter
+    arrange_gap_m: 0.005
+    arrange_yaw_deg: 0
+    arrange_yaw_jitter_deg: 25
+    arrange_xy_jitter_m: 0.02
     tilt_deg:
       upright: [0, 6]
       flipped: [8, 35]
     allow_flipped: false
     parts_per_crate:
       - # pallet 0
-        - [[6, 6], [6, 6], [6, 6]]
-        - [[6, 6], [6, 6], [6, 6]]
-        - [[6, 6], [6, 6], [6, 6]]
-        - [[6, 6], [6, 6], [6, 6]]
-        - [[6, 6], [6, 6], [6, 6]]
-        - [[6, 6], [6, 6], [6, 6]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
       - # pallet 1
-        - [[1, 1], [1, 1], [1, 1]]
-        - [[1, 1], [1, 1], [1, 1]]
-        - [[1, 1], [1, 1], [1, 1]]
-        - [[1, 1], [1, 1], [1, 1]]
-        - [[1, 1], [1, 1], [1, 1]]
-        - [[1, 1], [1, 1], [1, 1]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [4, 4]]
+        - [[4, 4], [4, 4], [8, 8]]
 
     switch_topic: /crate_active
     physics:

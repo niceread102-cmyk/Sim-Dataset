@@ -1,0 +1,90 @@
+# Sequence of the side plate map (SIDE_PLATE_MAP) with m20_35_18d_mhzl2_20d: control/auto_control.py empties the crates one by one (the poses of the parts come from robot_sim.py), each plate is put at its place pose (standard | turn_over) when the laser marker says that seat is free (/laser_marker/state); a plate on the standard seat (/laser_marker/ready) is taken to the belt of the laser marker (transfer:) between the crate picks.
+# Poses are TCP poses in the world frame of the map, tool down = roll 180.   ros2 launch robot.launch.py sequence:=side_plate_test
+robot: m20_35_18d_mhzl2_20d
+robot_pose: [-0.0635, -0.0035, 1.1, 0, 0, 180]
+target: tcp
+
+poses:
+  lift_z: 1.35
+  home: [0.061, -0.749, 1.4855, 180, 0, 45]
+
+  carry_z: 1.55
+  place_offset: 0.3
+
+  place:
+    standard:  [-0.512, -0.658, 1.070, 180, 0, 0]
+    turn_over: [-0.312, -0.658, 1.010, 180, 0, 0]
+
+  crates:
+
+    - {centre: [0.2141, -0.7418], home: [0.0610, -0.7490, 1.4855, 180, 0, 45]}
+    - {centre: [0.4736, -1.0014], home: [0.3205, -1.0086, 1.4855, 180, 0, 45]}
+    - {centre: [0.7332, -1.2609], home: [0.5801, -1.2681, 1.4855, 180, 0, 45]}
+    - {centre: [0.5832, -0.3727], home: [0.4301, -0.3799, 1.4855, 180, 0, 45]}
+    - {centre: [0.8428, -0.6322], home: [0.6897, -0.6394, 1.4855, 180, 0, 45]}
+    - {centre: [1.1023, -0.8918], home: [0.9492, -0.8990, 1.4855, 180, 0, 45]}
+
+    - {centre: [0.2141, 0.8918], home: [0.0610, 0.8846, 1.4855, 180, 0, 45]}
+    - {centre: [0.4736, 0.6322], home: [0.3205, 0.6250, 1.4855, 180, 0, 45]}
+    - {centre: [0.7332, 0.3727], home: [0.5801, 0.3655, 1.4855, 180, 0, 45]}
+    - {centre: [0.5832, 1.2609], home: [0.4301, 1.2537, 1.4855, 180, 0, 45]}
+    - {centre: [0.8428, 1.0014], home: [0.6897, 0.9942, 1.4855, 180, 0, 45]}
+    - {centre: [1.1023, 0.7418], home: [0.9492, 0.7346, 1.4855, 180, 0, 45]}
+
+crate:
+  pallet_order: [1, 0]
+  scan: {offset_m: [-0.1531, -0.0072], height_m: 0.4006, rpy_deg: [180, 0, 45]}
+  size: [0.4516, 0.3042]
+  yaw: 45
+  margin: 0.02
+  floor_z: 1.0849
+  rank_weights: {flat: 3.0, height: 1.0, centre: 0.5}
+  layers: 6
+  layer_pitch_m: 0.190
+  per_pallet: 6
+  clear_topic: /crate_clear
+  next_topic: /crate_next
+  ready_topic: /crate_ready
+  active_topic: /crate_active
+  parts_request_topic: /crate_parts_request
+  parts_topic: /crate_parts
+  parts_remove_topic: /crate_parts_remove
+  #remove_placed: true
+  remove_placed: false
+  remove_radius_m: 0.08
+  settle_s: 1.0
+
+# transfer:
+#   pick:  [-0.512, -0.658, 1.0625, 180, 0, 0]
+#   place: [-0.972, -0.658, 1.0070, 180, 0, 0]
+#   align_yaw: true
+#   stay_over_standard: true
+#   stay_over_turn_over: true
+#   follow_part_xy: true
+transfer:
+  pick:  [-0.512, -0.658, 1.0625, 180, 0, 0]
+  place: [-0.972, -0.658, 1.0070, 180, 0, 0]
+  align_yaw: true
+  stay_over_standard: true
+  stay_over_turn_over: true
+  follow_part_xy: true
+  state_topic: /laser_marker/state
+  zone_topic: /robot/zone
+
+
+waits:
+  release: 0.2
+
+crate_list:
+  - {centre: [0.733153318805774, -1.260863058585152], home: [0.5800533188057739, -1.268063058585152, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [0.47364513011031106, -1.0013548698896888], home: [0.32054513011031105, -1.008554869889689, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [0.21413694141484818, -0.7418466811942259], home: [0.06103694141484817, -0.7490466811942259, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [1.1022630585851518, -0.891753318805774], home: [0.9491630585851518, -0.898953318805774, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [0.842754869889689, -0.6322451301103111], home: [0.6896548698896889, -0.6394451301103111, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [0.5832466811942261, -0.37273694141484814], home: [0.43014668119422605, -0.37993694141484813, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 1}
+  - {centre: [0.733153318805774, 0.37273694141484814], home: [0.5800533188057739, 0.36553694141484816, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}
+  - {centre: [0.47364513011031106, 0.6322451301103111], home: [0.32054513011031105, 0.6250451301103112, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}
+  - {centre: [0.21413694141484818, 0.891753318805774], home: [0.06103694141484817, 0.884553318805774, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}
+  - {centre: [1.1022630585851518, 0.7418466811942259], home: [0.9491630585851518, 0.7346466811942259, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}
+  - {centre: [0.842754869889689, 1.0013548698896888], home: [0.6896548698896889, 0.9941548698896888, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}
+  - {centre: [0.5832466811942261, 1.260863058585152], home: [0.43014668119422605, 1.2536630585851518, 0.5355, 180, 0, 45], floor_z: 0.1349, level: 0, group: 0}

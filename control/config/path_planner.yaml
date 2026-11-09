@@ -1,0 +1,24 @@
+# Settings of control/path_planner.py: the shape of the paths, the same for every map and robot (the coordinates come from control/sequence/<name>.yaml).
+approach: pan
+place: pan
+home: pan
+crate: pan
+pan_turn: wrist
+pan_step: 0.10
+climb_deg: 60
+crate_z_first: true
+crate_joint: true
+carry_z_first: true
+approach_slope_deg: 25
+via_step_m: 0.1
+via_angle_deg: 15
+fuse_moves: true
+reach_check: true
+no_joint_fallback: [approach, insert]
+reach_fallbacks:
+  - {approach: joint, rise_mode: joint}
+  - {approach: joint, rise_mode: joint, insert_mode: joint}
+joint_line_pieces: 5
+pick_tilt_max_deg: 8
+pick_tilt_first_deg: 5
+pick_tilt_dirs_deg: [0, 90, 180, 270]

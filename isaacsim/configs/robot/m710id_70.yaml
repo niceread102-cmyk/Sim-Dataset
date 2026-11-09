@@ -1,15 +1,16 @@
-# m710id_70: FANUC M-710iD/70 in isaacsim/robot_sim.py and MoveIt (URDF, gripper, start pose in rad, drives, speeds, limits), the same in every map.
+# m710id_70: FANUC M-710iD/70: top level = URDF, gripper, start pose in rad, limits for MoveIt / ik_node.py / robot_sequence.py (the same on the real robot), `sim:` = drives, speeds and colliders of isaacsim/robot_sim.py only, the same in every map.
 # lab robot_sim.py robot:=m710id_70   |   ros2 launch robot.launch.py robot:=m710id_70
 name: m710id_70
 gripper: none
 pos_m: [0.0, 0.0, 0.0]
 rpy_deg: [0, 0, 0]
 joint_pos: {J3: -0.2618, J5: -1.3090}
-stiffness: 20000
-damping: 1000
-speed: 0.3
 velocity_scaling: 0.15
 acceleration_scaling: 0.05
 joint_limits_deg: {}
-physics_hz: 60
 controller: /m710id_70_traj_controller
+sim:
+  stiffness: 20000
+  damping: 1000
+  speed: 0.3
+  physics_hz: 60

@@ -1,8 +1,12 @@
-"""laser_marker.py: cycle of the laser marker: the flipper turns a turn_over plate onto the standard seat and tells the robot (/laser_marker/ready),
-the belt moves after /transfer_done, the left hands put the plates on the conveyor.
+"""laser_marker.py: cycle of the laser marker, run on its own from the part sensors of robot_sim.py (/laser_marker/sensors): a plate still on the turn_over seat
+(and the standard seat free) -> the flipper turns it onto the standard seat; a plate still on the standard seat -> /laser_marker/ready once (the robot takes it to the belt);
+a plate still on the belt place slot -> the belt moves one pitch; a plate in front of each hand pair -> the left hands put them on the conveyor.
+/laser_marker/state (latched json {standard_free, turn_over_free}) tells the robot where it may put a plate now; the flipper and the belt only move
+while the robot is clear of their seats (/robot/zone: latched json list of the seats robot_sequence.py works at).
 
     python3 isaacsim/machine/laser_marker.py [--now [standard|turn_over|hands]]        (robot.launch.py with a sequence starts it; settings: configs/machine/laser_marker.yaml)
 """
+import json
 import argparse
 import os
 import sys
@@ -47,10 +51,14 @@ FLIPPER_CLOSED = -float(need('cycle.flipper.close_mm')) / 1000.0
 LEFT_CLOSED = -float(need('cycle.hands.close_mm')) / 1000.0
 TOPIC_HAND_PLATES = str(need('hands.topic'))
 TOPIC_READY = str(need('cycle.topics.ready'))
-TOPIC_TRANSFER_DONE = str(need('cycle.topics.transfer_done'))
+TOPIC_MACHINE_STATE = str(need('cycle.topics.state'))
+TOPIC_ROBOT_ZONE = str(need('cycle.topics.robot_zone'))
 TOPIC_HANDS_DONE = str(need('cycle.topics.hands_done'))
 TOPIC_HANDS_RELEASE = str(need('cycle.topics.hands_release'))
-TOPIC_DONE = str(need('cycle.topics.sequence_done'))
+TOPIC_SENSORS = str(need('sensors.topic'))
+SENSORS = [str(k) for k in need('sensors.points_m')]
+SENSOR_STILL = float(need('cycle.sensor_still_s'))
+LATCHED = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 TOPIC_COMMAND = f'/{MACHINE}/joint_command'
 TOPIC_STATE = f'/{MACHINE}/joint_states'
 TOPIC_CARRIERS = str(need('carriers.topic'))
@@ -71,17 +79,19 @@ class LaserMarker(Node):
         self.lock = threading.Lock()
         self.slots = [False] * SLOTS
         self.create_subscription(JointState, TOPIC_STATE, self.cb_state, 10)
-        self.create_subscription(Bool, f'{TOPIC_CARRIERS}/moving', self.cb_moving,
-                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.create_subscription(String, TOPIC_DONE, self.cb_done, 10)
+        self.create_subscription(Bool, f'{TOPIC_CARRIERS}/moving', self.cb_moving, LATCHED)
         self.joint_pub = self.create_publisher(JointState, TOPIC_COMMAND, 10)
         self.belt_pub = self.create_publisher(Int32, TOPIC_CARRIERS, 10)
         self.hands_done_pub = self.create_publisher(Empty, TOPIC_HANDS_DONE, 10)
         self.hands_release_pub = self.create_publisher(Empty, TOPIC_HANDS_RELEASE, 10)
         self.ready_pub = self.create_publisher(Empty, TOPIC_READY, 10)
-        self.create_subscription(Empty, TOPIC_TRANSFER_DONE, self.cb_transfer_done, 10)
+        self.state_pub = self.create_publisher(String, TOPIC_MACHINE_STATE, LATCHED)
         self.create_subscription(Int32, TOPIC_HAND_PLATES, self.cb_hand_plates, 10)
+        self.create_subscription(Int32, TOPIC_SENSORS, self.cb_sensors, 10)
+        self.create_subscription(String, TOPIC_ROBOT_ZONE, lambda m: setattr(self, 'robot_zone', json.loads(m.data)), LATCHED)
         self.hand_mask, self.hand_since, self.hands_wait_clear = 0, 0.0, False
+        self.sensors, self.sensors_since, self.flipping, self.ready_sent, self.state = None, 0.0, False, False, None
+        self.robot_zone, self.zone_wait = [], None
 
     def cb_state(self, msg):
         self.q.update(zip(msg.name, msg.position))
@@ -90,15 +100,57 @@ class LaserMarker(Node):
     def cb_moving(self, msg):
         self.moving = bool(msg.data)
 
-    def cb_done(self, msg):
-        state = msg.data.strip().lower()
-        if state not in FLIP_FOR:
-            self.get_logger().info(f'sequence done with a {state or "?"} part: nothing to do for the machine')
+    def seen(self, name):
+        return bool(self.sensors and self.sensors & (1 << SENSORS.index(name)))
+
+    def publish_state(self):
+        state = {'standard_free': not (self.seen('standard') or self.seen('turn_over') or self.flipping),
+                 'turn_over_free': not (self.seen('turn_over') or self.flipping)}
+        if state != self.state:
+            self.state = state
+            self.state_pub.publish(String(data=json.dumps(state)))
+
+    def launch(self, target):
+        self.busy = True
+        threading.Thread(target=target, daemon=True).start()
+
+    def cb_sensors(self, msg):
+        mask, now = int(msg.data), time.time()
+        if mask != self.sensors:
+            self.sensors, self.sensors_since = mask, now
+            self.get_logger().info('sensors: ' + ', '.join(f"{n} {'X' if self.seen(n) else '.'}" for n in SENSORS))
+        if not self.seen('standard'):
+            self.ready_sent = False
+        self.publish_state()
+        if self.busy or now - self.sensors_since < SENSOR_STILL:
             return
-        if self.busy:
-            self.get_logger().info('the machine is still running its cycle: /sequence_done waits for its end')
-        self.get_logger().info(f'a {state} part was placed: ' + ('flipper, then ' if FLIP_FOR[state] else '') + 'the robot takes it to the belt')
-        threading.Thread(target=self.cycle, args=(FLIP_FOR[state],), daemon=True).start()
+        zone = set(self.robot_zone or [])
+        if self.seen('turn_over') and not self.seen('standard'):
+            if zone & {'turn_over', 'standard'}:
+                if self.zone_wait != 'flipper':
+                    self.zone_wait = 'flipper'
+                    self.get_logger().info(f'a plate lies on the turn_over seat, the robot still works at {sorted(zone)}: the flipper waits until it is clear')
+            else:
+                self.zone_wait = None
+                self.get_logger().info('a plate lies on the turn_over seat and the robot is clear: the flipper turns it onto the standard seat')
+                self.flipping = True
+                self.publish_state()
+                self.launch(self.flip_cycle)
+                return
+        if self.seen('standard') and not self.ready_sent:
+            self.ready_sent = True
+            self.get_logger().info('a plate lies on the standard seat: the robot takes it to the belt')
+            self.ready_pub.publish(Empty())
+        if self.seen('belt') and not self.moving and 'belt' not in zone:
+            self.get_logger().info('a plate lies on the belt place slot and the robot is clear: the belt moves one pitch')
+            self.launch(self.after_transfer)
+
+    def flip_cycle(self):
+        try:
+            self.run_cycle('flipper cycle', lambda log: self.flipper(log, FLIP, JAWS, FLIP_REST, FLIP_GRAB, FLIP_RELEASE, FLIPPER_CLOSED), 'flipper cycle done')
+        finally:
+            self.flipping = False
+            self.sensors_since = time.time()
 
     def wait_machine(self):
         end = time.time() + TIMEOUT['machine']
@@ -187,15 +239,10 @@ class LaserMarker(Node):
             return
         self.hands_wait_clear = True
         self.get_logger().info('a plate in front of each of the two hand pairs: the hands take them over to the conveyor')
-        threading.Thread(target=self.hands_cycle, daemon=True).start()
+        self.launch(self.hands_cycle)
 
     def hands_cycle(self):
         self.run_cycle('hands cycle', self.hands, 'hands cycle done: waiting for the next two plates')
-
-    def cb_transfer_done(self, _):
-        if self.busy:
-            self.get_logger().info('the machine is still running its cycle: /transfer_done waits for its end')
-        threading.Thread(target=self.after_transfer, daemon=True).start()
 
     def after_transfer(self):
         self.run_cycle('belt cycle', self.belt, 'belt cycle done')
@@ -279,7 +326,7 @@ def main():
             while worker.is_alive():
                 executor.spin_once(timeout_sec=0.05)
         else:
-            node.get_logger().info(f'waiting for {TOPIC_DONE} (the robot has put the plate down and is at home again): standard = ready for the robot, turn_over = flipper, then ready')
+            node.get_logger().info(f'waiting for plates on {TOPIC_SENSORS} ({", ".join(SENSORS)}): turn_over = flipper, standard = {TOPIC_READY} for the robot, belt = one pitch')
             executor.spin()
     except KeyboardInterrupt:
         pass
